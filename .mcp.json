@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "kql-search-mcp": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "kql-search-mcp@1.0.5"],
+      "env": {
+        "GITHUB_TOKEN": "${GITHUB_TOKEN}"
+      }
+    },
+    "ms-learn-mcp": {
+      "type": "http",
+      "url": "https://learn.microsoft.com/api/mcp"
+    }
+  }
+}

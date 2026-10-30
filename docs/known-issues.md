@@ -91,9 +91,9 @@ This bridges the two environments: `RunAzCliReadCommands` (has Azure auth) → f
 
 The `read_skill_file` API returns file **content** but does **not** place files on the sandbox filesystem. Attempting to run `python3 <script>.py` after calling `read_skill_file` will fail with `No such file or directory` (exit code 2).
 
-**Resolution:** This is handled by the **File Resolution Cascade** documented in the main README — scripts are found first in `codeRefs/`, then `tmp/`, and materialized from the Builder API only as a last resort. With this repository connected to the agent, scripts are always available in `codeRefs/` and this issue does not arise.
+**Resolution:** This is handled by the **File Resolution Cascade** documented in the main README — scripts are found first in the installed skill directory (`runtime-content/skills/plugins/*/live/<skill>/` for a plugin installation, `runtime-content/skills/extended/live/<skill>/` for Skill Builder, or `codeRefs/*/skills/<skill>/` with Code Access), then in `tmp/`, and materialized with `read_skill_file` only as a last resort. With the skills installed as a plugin or with Skill Builder, the scripts are already on disk and this issue does not arise.
 
-**Affects:** Agents that do NOT have this repository connected (fallback to Builder materialization).
+**Affects:** Only agents where the installed skill directory is not available (fallback to `read_skill_file` materialization).
 
 ### 1.7 `RunAzCliWriteCommands` — Inline Body Size Limit (~4,000 chars)
 
@@ -307,24 +307,28 @@ If the agent omits `body`, the server returns:
 
 ### The Problem
 
-Azure SRE Agent has a **per-agent memory system** (`memories/synthesizedKnowledge/`) that persists across conversation threads. When you first deploy the agent and connect this repository, the agent's memory is **empty** — it doesn't know any of the pitfalls and patterns documented above. It will discover them the hard way (failed queries, empty results, permission errors) and gradually learn them, just as the original author's agent did.
+Azure SRE Agent has a **per-agent memory system** (`memories/synthesizedKnowledge/`) that persists across conversation threads. When you first deploy the agent and install the skills, the agent's memory is **empty** — it doesn't know any of the pitfalls and patterns documented above. It will discover them the hard way (failed queries, empty results, permission errors) and gradually learn them, just as the original author's agent did.
 
-### The Solution — Seed the Agent's Memory
+### The Solution — Seed the Agent's Knowledge
 
-You can **bootstrap** the agent's knowledge by asking it to read this file and save the learnings to its memory. This is a one-time operation per agent instance.
+`tools/setup_agent.py` uploads this file to the agent **knowledge base**, which the agent searches automatically when a question or a failure is relevant (see the main README, Setup E2). Run `python tools/setup_agent.py --only knowledge` again after this file changes.
+
+You can also **bootstrap** the agent's memory by asking it to read this file and save the learnings. This is a one-time operation per agent instance.
 
 **When to do it:** After the initial setup (permissions assigned, connectors enabled), in the **first conversation thread** with the agent — before running any skill.
 
 **What to say:**
 
 ```
-Read the file codeRefs/sec-sre-ag/docs/known-issues.md and save its contents 
-to your memory as operational knowledge. Organize it into your debugging index 
+Search your knowledge base for the document known-issues.md and save its contents
+to your memory as operational knowledge. Organize it into your debugging index
 and behavior expectations as you see fit.
 ```
 
+If the repository is connected through Code Access, you can reference the file directly instead: `Read the file codeRefs/<customer-repo>/docs/known-issues.md and save its contents ...`.
+
 The agent will:
-1. Read this file from the connected repository
+1. Read this file from its knowledge base (or from the connected repository)
 2. Extract the durable facts (platform constraints, KQL pitfalls, operational patterns)
 3. Save them to `memories/synthesizedKnowledge/` organized by topic
 4. Reference them in future investigations automatically
@@ -334,10 +338,10 @@ The agent will:
 **No.** Once the agent has saved the knowledge to its memory, it persists across all future threads. You only need to re-seed if:
 - You **delete** the agent and recreate it (new agent = empty memory)
 - You manually clear the `memories/synthesizedKnowledge/` directory
-- This file is **significantly updated** with new learnings — in that case, ask the agent:
+- This file is **significantly updated** with new learnings — in that case, upload it again with `python tools/setup_agent.py --only knowledge` and ask the agent:
   ```
-  Re-read codeRefs/sec-sre-ag/docs/known-issues.md — it has been updated. 
-  Merge the new information into your existing memory.
+  The document known-issues.md in your knowledge base has been updated.
+  Re-read it and merge the new information into your existing memory.
   ```
 
 ### Can I Add My Own Learnings?

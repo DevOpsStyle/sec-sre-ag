@@ -26,6 +26,7 @@ build/
 config.json
 config.local.json
 deploy.config.json
+tools/discovered/
 *.key
 *.pem
 *.pfx

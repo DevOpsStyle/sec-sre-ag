@@ -1,0 +1,8 @@
+{
+  "name": "sec-sre-ag",
+  "description": "Security operations skills for Azure SRE Agent across Microsoft Sentinel, Defender XDR and Entra ID: threat pulse dashboard, incident listing, investigation, statistics and commenting, user, device and IoC investigations, identity posture, KQL query authoring, MITRE ATT&CK coverage, Sentinel ingestion optimization and MCP usage monitoring. Every skill bundles the Python scripts and data files it runs.",
+  "skills": [
+    "skills/"
+  ],
+  "mcpServers": ".mcp.json"
+}

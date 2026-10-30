@@ -47,9 +47,9 @@ def load_config() -> dict:
     # Auto-load .env file from the project root if present
     load_dotenv(Path(__file__).parent / '.env')
     config = {}  # config.json is optional
-    # Walk up from script dir to find config.json (max 6 levels)
+    # Walk up from script dir to find config.json (max 10 levels: the plugin install path is 6 deep)
     d = Path(__file__).parent.resolve()
-    for _ in range(6):
+    for _ in range(10):
         candidate = d / 'config.json'
         if candidate.exists():
             try:

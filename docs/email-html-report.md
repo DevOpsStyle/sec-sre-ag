@@ -10,10 +10,13 @@ When the user asks to send an HTML report by email, the agent MUST follow this w
 
 ### Step 1 — Generate the HTML Report
 
-Run the current skill's `generate_html_report.py` script to produce the HTML file:
+Run the current skill's `generate_html_report.py` script to produce the HTML file.
+`<SKILL_DIR>` is the skill directory resolved by the skill's **File Resolution**
+section (for a plugin installation:
+`runtime-content/skills/plugins/<installation>/live/<skill-name>`):
 
 ```bash
-python3 codeRefs/sec-sre-ag/<skill-name>/generate_html_report.py \
+python3 <SKILL_DIR>/generate_html_report.py \
     <input-dir> \
     --output-dir reports/<skill-name>/ \
     --tenant <tenant_name>

@@ -9,24 +9,87 @@ commenting; forensic investigation of users, endpoints, and indicators of
 compromise; identity posture assessment; KQL query authoring and validation;
 MITRE ATT&CK coverage analysis; Sentinel ingestion optimization; and MCP usage
 monitoring. Skills accept natural-language requests, collect evidence through
-approved agent tools, run repository scripts through Code Access, and produce
-structured findings, charts, and HTML reports. Top-level skill directories hold
-Python runtime code and data, while `.builder` holds deployable Skill Builder
-instructions and supporting documents. The setup assets create or update the
-skills and configure the identities, permissions, connectors, and data sources
-required for customer-owned Azure SRE Agent deployments.
+approved agent tools, run their bundled Python scripts in the agent sandbox, and
+produce structured findings, charts, and HTML reports. The repository is an
+Azure SRE Agent plugin: `plugin.json` imports the self-contained skill folders
+under `skills/` (instructions, reference documents, Python scripts, and data
+files) with **Install from GitHub**, and `tools/setup_agent.py` configures through
+the Azure SRE Agent REST APIs what a plugin cannot install. The setup assets
+configure the identities, permissions, connectors, and data sources required for
+customer-owned Azure SRE Agent deployments.
 
 ## Contents
 
 | Section | What it contains |
 |---|---|
+| [Quick start](#quick-start) | Install the skills as a plugin and configure the agent in three steps |
 | [Skills](#skills) | Supported security operations use cases, capabilities, and example prompts |
 | [Prerequisites](#prerequisites) | Required tooling, subscriptions, licenses, accounts, network access, and minimum administrative roles |
-| [Setup](#setup) | Customer repository, agent creation, connectors, skill deployment, IDs, permissions, RBAC, and data prerequisites |
+| [Setup](#setup) | Customer repository, agent creation, plugin, connectors, IDs, permissions, RBAC, and data prerequisites |
 | [Validation Tests](#validation-tests) | Basic connector checks and smoke tests for every deployed skill |
-| [Sandbox Architecture & Script Retrieval](#sandbox-architecture--script-retrieval) | Code Access, file resolution, script execution, and runtime configuration behavior |
-| [Repository Structure](#repository-structure) | Separation between runtime scripts, shared code, and Skill Builder content |
+| [Sandbox Architecture & Script Retrieval](#sandbox-architecture--script-retrieval) | Where the installed skill files live in the sandbox, file resolution, script execution, and runtime configuration behavior |
+| [Repository Structure](#repository-structure) | Plugin layout, shared files, tools, and how to change a skill |
 | [Configuration](#configuration) | Generated `config.json` schema and value sources |
+
+---
+
+## Quick start
+
+This repository is an Azure SRE Agent **plugin**, packaged like the plugins of the
+[Azure SRE Agent plugin marketplace](https://github.com/Azure/sre-agent-plugins):
+`plugin.json` imports every skill folder under `skills/`, and each folder already
+contains the Python scripts and data files the skill runs. **There are no Python
+scripts to copy or paste by hand**: Azure SRE Agent copies each skill folder into
+the agent sandbox, and the skills run the scripts from there.
+
+1. **Install the plugin** (portal, two minutes):
+   1. Open <https://sre.azure.com>, select the agent (it must be **Running**), and go
+      to **Builder > Plugins** (**Build + setup > Extensions > Plugins** in newer
+      portal versions).
+   2. Select **Install from URL** (**Install GitHub plugin**).
+   3. **GitHub repository URL**: `<customer-org>/<customer-repo>`, for example
+      `DevOpsStyle/sec-sre-ag`. **Path in repo**: leave it empty, because
+      `plugin.json` is at the repository root.
+   4. Private repository only: expand **Advanced** and enter a GitHub PAT with
+      read access to the repository.
+   5. Select **Install** and wait for *Plugin installed from URL successfully with
+      13 skills*. The skills appear in **Skill builder**.
+2. **Configure the rest with one command**: connectors, knowledge base and,
+   optionally, Code Access. From a clone of the repository, with Python 3.10+ and
+   Azure CLI:
+
+   ```bash
+   az login
+   export KQL_SEARCH_GITHUB_TOKEN='<read-only GitHub PAT>'   # optional, for kql-search-mcp
+   python tools/setup_agent.py --sub <SUBSCRIPTION_ID> --rg <RESOURCE_GROUP> --agent <AGENT_NAME> --dry-run
+   python tools/setup_agent.py --sub <SUBSCRIPTION_ID> --rg <RESOURCE_GROUP> --agent <AGENT_NAME>
+   ```
+
+   In PowerShell, set the token with `$env:KQL_SEARCH_GITHUB_TOKEN = '<PAT>'`. The
+   script also installs the plugin when step 1 was skipped, and every step is
+   idempotent. See [`tools/README.md`](tools/README.md) for all options.
+3. **Complete the steps that need a person.** The script prints them at the end,
+   with your IDs already filled in: the permission scripts in [`setup/`](setup)
+   (Graph and Defender application permissions, Sentinel and Key Vault roles) and
+   the Outlook and Teams connectors, which require an interactive OAuth sign-in.
+
+Then open a **new chat** and run the [validation tests](#validation-tests). The
+complete procedure, with prerequisites and roles, is in [Setup](#setup).
+
+| What | How it gets into the agent |
+|---|---|
+| 13 skills (`SKILL.md` and reference documents) | Plugin (step 1) |
+| Python scripts and data files used by the skills | Plugin (step 1): bundled in each skill folder and copied into the sandbox under `runtime-content/skills/plugins/<installation>/live/<skill>/` |
+| `sentinel-workspace` (Log Analytics), `ms-learn-mcp` and `kql-search-mcp` connectors | `tools/setup_agent.py` (step 2) |
+| `docs/known-issues.md` in the agent knowledge base | `tools/setup_agent.py` (step 2) |
+| Code Access (optional, for example for the DOCX technical report module) | `tools/setup_agent.py --code-repo <owner>/<repo>` (step 2) |
+| Graph and Defender application permissions, Sentinel and Key Vault roles | `setup/*.sh` scripts (step 3) |
+| Outlook and Teams connectors | Portal OAuth sign-in (step 3) |
+
+**Updates.** A plugin installation is pinned to a Git commit. When **Enable
+automatic updates** is on (install dialog), the agent picks up new commits of the
+repository automatically; otherwise update the plugin from **Builder > Plugins**
+after you push changes.
 
 ---
 
@@ -205,13 +268,16 @@ steps. Use time-bound elevation and the narrowest practical scope.
    grant the required repository access, and clone the repository to the local
    computer. Install Git and confirm that outbound HTTPS to `github.com` is
    allowed.
-- The latest stable Python release available for `.builder/deploy/deploy_skills.py`
-   and local script validation. The latest tests were performed with Python
-   **3.14.7**. The deployer uses the standard library; PyYAML is optional.
-- Azure CLI installed on the workstation used to run the Python deployment
-   tool and authenticated to the Entra tenant that owns the target
-   subscription. Use `az login`, or `az login --tenant <TARGET_TENANT_ID>` when
-   the target tenant differs from the operator's default tenant.
+- Python 3.10 or later for the tools in [`tools/`](tools) (`setup_agent.py`,
+   `plugin.py`, `deploy_skills.py`) and local script validation. The latest tests
+   were performed with Python **3.14.7**. The tools use the standard library;
+   `tools/plugin.py check` also needs PyYAML. Python is not needed on the
+   workstation if you install the plugin and configure the connectors in the
+   portal.
+- Azure CLI installed on the workstation used to run the Python tools and
+   authenticated to the Entra tenant that owns the target subscription. Use
+   `az login`, or `az login --tenant <TARGET_TENANT_ID>` when the target tenant
+   differs from the operator's default tenant.
 - A modern browser that permits OAuth pop-ups from `sre.azure.com`. Node.js/npm
    is needed only when running an `npx`-based MCP server locally; the configured
    `kql-search-mcp` connector itself invokes `npx` in its connector runtime.
@@ -235,8 +301,8 @@ steps. Use time-bound elevation and the narrowest practical scope.
    `https://management.azure.com`), the Azure SRE Agent data plane, Microsoft
    Entra ID, Microsoft Graph, Azure Monitor/Log Analytics endpoints, GitHub,
    and the OAuth endpoints used by Teams and Exchange Online. In particular,
-   the workstation that runs the Python deployment tool must be able to reach
-   the Azure management and SRE Agent endpoints.
+   the workstation that runs the Python tools must be able to reach the Azure
+   management and SRE Agent endpoints.
 - A running Microsoft Sentinel Log Analytics workspace containing the data that
    the selected skills need. Required Sentinel, Defender, Entra, Microsoft 365,
    and Identity Protection licenses must already be assigned. In particular,
@@ -268,7 +334,9 @@ required together.
 | Create the SRE Agent and supporting resources | **Contributor** plus **Role Based Access Control Administrator** on the target subscription or target resource group; alternatively, **Owner** on that scope. Contributor alone is not sufficient. Creating the resource group itself also requires, at least temporarily, permission to create resource groups at subscription scope. Registering `Microsoft.App` likewise requires the appropriate subscription-level permission. |
 | Select managed resource groups or change agent Azure permissions | **SRE Agent Administrator** on the agent plus **Owner** or **User Access Administrator** on each managed resource group. Start the agent with Reader-level access. |
 | Configure Builder, Code Access, connectors, and skills | **SRE Agent Administrator** on the agent resource. This is the documented role with full connector and configuration access. If a portal version exposes **SRE Agent Author**, use it only for operations that explicitly accept it; Administrator covers this repository's complete setup and validation flow. |
-| Deploy skills with `.builder/deploy/deploy_skills.py` | **Reader** on the agent resource for ARM discovery plus **SRE Agent Administrator** (or an explicitly supported Author role) for data-plane skill changes. |
+| Install the plugin (portal or `tools/setup_agent.py`) | **SRE Agent Administrator** (or Author) on the agent resource. A private repository also needs a GitHub PAT with read access to it. |
+| Configure connectors and the knowledge base with `tools/setup_agent.py` | **SRE Agent Administrator** on the agent resource. Automatic discovery of the Sentinel workspace also needs **Reader** on it; otherwise pass `--workspace`. |
+| Deploy skills with `tools/deploy_skills.py` (alternative to the plugin) | **Reader** on the agent resource for ARM discovery plus **SRE Agent Administrator** (or an explicitly supported Author role) for data-plane skill changes. |
 | Create Outlook or Teams managed connections | SRE Agent access above, a managed identity, and `Microsoft.Web/connections/write` plus `Microsoft.Authorization/roleAssignments/write` on the agent resource group. A least-privilege built-in combination is **Contributor** plus **Role Based Access Control Administrator** or **User Access Administrator**; **Owner** also works. |
 | Create the Log Analytics connector | **SRE Agent Administrator** on the agent and **Owner** or **User Access Administrator** on the target workspace/resource group so the wizard can assign Log Analytics roles to the managed identity. Resource Graph read access is needed for automatic workspace discovery. |
 | Assign Graph and Defender API Application permissions | **Privileged Role Administrator** or **Global Administrator** in the target Entra tenant. The role holder runs `setup/assign-permissions.sh`; Azure subscription RBAC alone is insufficient. |
@@ -443,28 +511,37 @@ Application permissions to the UAMI.
 
 ### D. Configure Code Access and connectors
 
-In the agent portal, connect the customer repository under **Builder > Code
-Access**. For `github.com`, prefer GitHub OAuth for interactive Code Access; it
-does not require a PAT. Code Access provides repository search, reads, and
-context; it does not create file changes or commits. If the agent must maintain
-customer-specific skills and scripts, add a separately governed **GitHub MCP**
-connector with only the required branch, file, commit, and pull-request tools.
-Protect `main` and require changes through reviewed pull requests. Then add the
-connectors below under **Builder > Connectors**:
+`tools/setup_agent.py` (see [E](#e-install-the-skills-as-a-plugin-and-configure-the-agent))
+creates the **Log Analytics Workspace**, **kql-search-mcp** and **ms-learn-mcp**
+connectors through the API and, with `--code-repo`, Code Access. This section is
+the reference for what they contain and the manual procedure in the portal.
+Outlook and Teams always need the portal, because they require an interactive
+OAuth sign-in.
+
+Code Access is **optional**: the plugin already bundles every script the skills
+run. Connect a repository under **Builder > Code Access** only when the agent must
+search or read it, for example the private repository of the optional DOCX
+technical report module. For `github.com`, prefer GitHub OAuth for interactive
+Code Access; it does not require a PAT. Code Access provides repository search,
+reads, and context; it does not create file changes or commits. If the agent must
+maintain customer-specific skills and scripts, add a separately governed **GitHub
+MCP** connector with only the required branch, file, commit, and pull-request
+tools. Protect `main` and require changes through reviewed pull requests. Then add
+the connectors below under **Builder > Connectors**:
 
 | Connector | Configuration | Minimum enabled tools |
 |---|---|---|
 | **Outlook Tools (Office 365 Outlook)** | OAuth sign-in plus managed identity | `Send an email` |
 | **Microsoft Teams** | OAuth sign-in plus managed identity | `Post Message in a Chat or Channel`; `Post Message to myself`; `Get message details input metadata`; `Get message details response schema`; `Get response schema` |
 | **Log Analytics Workspace** | Customer subscription, resource group, Sentinel workspace, and managed identity | Connector-provided query operation |
-| **kql-search-mcp** | Stdio; command `npx`; arguments `-y`, `kql-search-mcp`; `GITHUB_TOKEN`; optional `FAVORITE_REPOS` | The 10 tools listed under [`kql-search-mcp`](#kql-search-mcp) below |
+| **kql-search-mcp** | Stdio; command `npx`; arguments `-y`, `kql-search-mcp` (`setup_agent.py` pins `kql-search-mcp@1.0.5`); `GITHUB_TOKEN`; optional `FAVORITE_REPOS` | The 10 tools listed under [`kql-search-mcp`](#kql-search-mcp) below |
 | **ms-learn-mcp** | Streamable HTTP; `https://learn.microsoft.com/api/mcp`; no authentication | Select all 3 tools |
 | **GitHub MCP** (only when repository writes are required) | GitHub MCP partner connector; separate fine-grained PAT | Only branch, file-content, commit, and pull-request tools required by the approved workflow |
 
 #### Code Access and GitHub MCP
 
 1. Open **Builder > Code Access**, add GitHub Code Access, and authenticate.
-2. For `github.com`, prefer OAuth and select only the customer repository.
+2. For `github.com`, prefer OAuth and select only the repositories the agent needs.
 3. Wait until the repository status is **Ready**, then run the Code Access test
    under [Connector smoke tests](#connector-smoke-tests).
 
@@ -561,37 +638,106 @@ Add an **MCP** connector, choose **Streamable HTTP**, set **MCP Server** to
 authentication**, enable all three returned tools, and verify the connector is
 **Connected**.
 
-### E. Deploy or update skills
+### E. Install the skills as a plugin and configure the agent
 
-Use [`.builder/deploy/deploy_skills.py`](.builder/deploy/deploy_skills.py) both
-for the initial creation of the agent's custom skills and for every subsequent
-update. The `deploy` command is idempotent: it sends a `PUT` for each selected
-skill, creating it when absent and replacing the existing skill definition and
-supporting files when present.
+The repository root is an Azure SRE Agent plugin. [`plugin.json`](plugin.json)
+imports every folder under [`skills/`](skills); each folder contains the skill
+instructions (`SKILL.md`), its reference documents, and the Python scripts and
+data files the skill runs. Azure SRE Agent copies each skill folder into the
+agent sandbox under `runtime-content/skills/plugins/<installation>/live/<skill>/`,
+where the skills find and run the scripts: no script needs to be copied by hand,
+and Code Access is not required. [`.mcp.json`](.mcp.json) declares the
+`kql-search-mcp` and `ms-learn-mcp` servers, so the plugin page shows which
+connectors the skills expect.
 
-Run these commands on a workstation with both the latest stable Python release
-and Azure CLI installed. Sign in to the target tenant with Azure CLI first, and
-ensure outbound traffic can reach Azure Resource Manager, including
-`https://management.azure.com`, and the Azure SRE Agent data-plane endpoint.
+#### E1. Install the plugin
 
-```bash
-cd .builder/deploy
-python deploy_skills.py deploy --dry-run
-python deploy_skills.py deploy
-python deploy_skills.py list
+In the portal (no local tooling needed):
+
+| Azure SRE Agent field | Value |
+|---|---|
+| **GitHub repository URL** | `<customer-org>/<customer-repo>`, the customer-owned repository of step A |
+| **Path in repo** | Leave it empty: `plugin.json` is at the repository root |
+| **Advanced** | Private repository only: a GitHub PAT with read access |
+
+1. Open <https://sre.azure.com>, select the agent and confirm it is **Running**.
+2. Go to **Builder > Plugins** (**Build + setup > Extensions > Plugins**) and
+   select **Install from URL** (**Install GitHub plugin**).
+3. Enter the values above. Keep **Enable automatic updates** on if new commits
+   must reach the agent automatically; turn it off to apply updates explicitly.
+4. Select **Install** and wait for *Plugin installed from URL successfully with
+   13 skills*. The plugin appears in the Plugins grid with the **Standalone**
+   badge, and the skills appear in **Skill builder**.
+
+The equivalent API call, which `tools/setup_agent.py` makes for you:
+
+```text
+POST {agentEndpoint}/api/v2/plugins/install-direct
+{ "sourceUrl": "<customer-org>/<customer-repo>", "pathInRepo": "" }
 ```
 
-To update only selected skills, pass their folder names:
+> **Migrating from the Skill Builder deployment.** If the skills were deployed
+> earlier with the deployment tool, delete them before installing the plugin:
+> the same skill names cannot be owned by Skill Builder and by a plugin.
+> `tools/setup_agent.py` detects the conflict and prints the exact command:
+>
+> ```bash
+> python tools/deploy_skills.py delete --sub <SUB> --rg <RG> --agent <AGENT> --skills computer-investigation,identity-posture,incident-comment,incident-investigation,incident-listing,incident-statistics,ioc-investigation,kql-query-authoring,mcp-usage-monitoring,mitre-coverage-report,sentinel-ingestion-report,threat-pulse,user-investigation
+> ```
+
+#### E2. Configure everything else through the API
+
+[`tools/setup_agent.py`](tools/setup_agent.py) uses the
+[Azure SRE Agent REST API](https://learn.microsoft.com/azure/sre-agent/api-reference)
+for what a plugin cannot install. Run it on a workstation with Python 3.10+ and
+Azure CLI, signed in to the tenant of the agent subscription:
 
 ```bash
-python deploy_skills.py deploy --skills identity-posture,incident-investigation
+az login
+export KQL_SEARCH_GITHUB_TOKEN='<read-only fine-grained PAT>'   # optional, for kql-search-mcp
+python tools/setup_agent.py --sub <SUB> --rg <RG> --agent <AGENT> --dry-run
+python tools/setup_agent.py --sub <SUB> --rg <RG> --agent <AGENT>
 ```
 
-The deployer uploads only Skill Builder content from `.builder/<skill>/`. Python
-runtime scripts remain in the top-level skill folders and are obtained through
-Code Access; they must not be copied into `.builder`. See the
-[deployment tool guide](.builder/deploy/README.md) for target configuration,
-cross-tenant deployment, and delete operations.
+| Step | Result |
+|---|---|
+| Plugin | Installs the plugin from the `origin` remote of the clone (or `--repo <owner>/<repo>`), unless it is already installed |
+| Connectors | `sentinel-workspace` Log Analytics connector with the agent managed identity (the Sentinel workspace is discovered in the agent subscription, or pass `--workspace <resource ID>`; an existing Log Analytics connector is kept), `ms-learn-mcp`, and `kql-search-mcp` when `KQL_SEARCH_GITHUB_TOKEN` is set. The MCP connectors are tested after creation |
+| Knowledge base | Uploads [`docs/known-issues.md`](docs/known-issues.md) to the agent knowledge base (see [section 7](#7-known-issues--memory-seeding)) |
+| Code Access (optional) | `--code-repo <owner>/<repo>` connects a repository, for example the private DOCX module |
+
+The script is idempotent. At the end it prints the remaining manual steps with
+the agent identity IDs already filled in: the permission scripts of
+[step C](#c-discover-the-required-ids-and-assign-permissions-to-the-agents-uami)
+and the Outlook and Teams connectors of [step D](#d-configure-code-access-and-connectors).
+See the [tools guide](tools/README.md) for every option and environment variable.
+
+#### E3. Update the skills
+
+1. Change the files under `skills/`. Edit files that several skills share only in
+   their canonical location (`shared/enrich_ips.py`, `shared/shared-guardrails.md`,
+   `docs/email-html-report.md`, `docs/teams-delivery.md`), then run
+   `python tools/plugin.py sync`.
+2. Run `python tools/plugin.py check`. The CI workflow runs it on every push and
+   pull request.
+3. Commit and push. With automatic updates on, the agent picks up the new
+   commit; otherwise update the plugin from **Builder > Plugins**.
+
+#### Alternative: Skill Builder deployment
+
+On agents where the plugin is not installed,
+[`tools/deploy_skills.py`](tools/deploy_skills.py) creates the same skills,
+scripts included, as Skill Builder skills; the agent copies their files into the
+sandbox under `runtime-content/skills/extended/live/<skill>/`:
+
+```bash
+python tools/deploy_skills.py deploy --sub <SUB> --rg <RG> --agent <AGENT> --dry-run
+python tools/deploy_skills.py deploy --sub <SUB> --rg <RG> --agent <AGENT>
+python tools/deploy_skills.py list   --sub <SUB> --rg <RG> --agent <AGENT>
+```
+
+Use one method per agent: the tool refuses to overwrite skills installed by a
+plugin.
 
 ### F. Optionally deploy the Microsoft Sentinel investigation playbooks
 
@@ -626,22 +772,24 @@ differs. The setup procedure was checked against:
 - [Set up a Log Analytics connector](https://learn.microsoft.com/azure/sre-agent/setup-log-analytics-connector)
 - [MCP connectors and tools](https://learn.microsoft.com/azure/sre-agent/mcp-connectors)
 - [Set up a GitHub connector](https://learn.microsoft.com/azure/sre-agent/github-connector)
+- [Install a plugin from a URL](https://learn.microsoft.com/azure/sre-agent/install-plugin-from-url) and [Plugin marketplace](https://learn.microsoft.com/azure/sre-agent/plugin-marketplace)
+- [API reference for Azure SRE Agent](https://learn.microsoft.com/azure/sre-agent/api-reference)
 - [`kql-search-mcp` package](https://www.npmjs.com/package/kql-search-mcp), verified at version `1.0.5`
 
 ### 0. Runtime `config.json` (created on first skill execution)
 
 `config.json` is runtime configuration for the SRE Agent sandbox. It is **not**
-created by the Cloud Shell setup scripts or by the skill deployment tool, and it
+created by the Cloud Shell setup scripts or by the tools in `tools/`, and it
 must not be committed to this repository. Do not confuse it with
-`.builder/deploy/deploy.config.json`, which only identifies the agent targeted by
-the deployment tool.
+`tools/deploy.config.json`, which only identifies the agent targeted by the
+tools.
 
-After connecting this repository and deploying the skills, invoke any skill in
-the table below. Before it runs its first script, the skill instructions require
-the agent to:
+After installing the plugin, invoke any skill in the table below. Before it
+runs its first script, the skill instructions require the agent to:
 
-1. Locate the root of the agent's runtime workspace (the parent of `codeRefs/`
-   and `tmp/`), not the root of a local deployment clone.
+1. Locate the root of the agent's runtime workspace (the directory that
+   contains `runtime-content/`, `codeRefs/` and `tmp/`, where the sandbox
+   terminal starts), not the root of a local clone.
 2. Check for `config.json` and validate the required workspace fields.
 3. If the file is missing or incomplete, ask only for the tenant name; derive
    the subscription ID, Log Analytics workspace GUID, and workspace name from
@@ -869,15 +1017,22 @@ The skills have been tested extensively and several **platform constraints, KQL 
 - KQL column-name gotchas (`ThreatIntelIndicators` vs deprecated `ThreatIntelligenceIndicator`, `SecurityIncident` alignment with Defender XDR portal, `SentinelHealth` casing)
 - Operational patterns (prefetch workflow, sequential Graph API calls)
 
-**First-time setup:** After connecting this repository to your agent, ask it to seed its memory with these learnings in the first conversation:
+**First-time setup (automatic):** `tools/setup_agent.py` uploads
+`docs/known-issues.md` to the agent knowledge base, which the agent searches
+automatically when it is relevant (step E2). After updating the file, run
+`python tools/setup_agent.py --only knowledge` to upload the new version.
 
-> **IMPORTANT — MANUAL ACTION REQUIRED:** This step is NOT performed automatically by the deployment process or by the agent. You MUST manually copy, paste, and send the prompt below in the agent's first conversation.
+**Optional: also seed the agent memory.** In the first conversation, send this
+prompt so that the agent also organizes the learnings in its memory:
 
 ```
-Read the file codeRefs/sec-sre-ag/docs/known-issues.md and save its contents 
-to your memory as operational knowledge. Organize it into your debugging index 
+Search your knowledge base for the document known-issues.md and save its contents
+to your memory as operational knowledge. Organize it into your debugging index
 and behavior expectations as you see fit.
 ```
+
+When the repository is also connected through Code Access, you can point the
+agent to the file directly: `Read the file codeRefs/<customer-repo>/docs/known-issues.md ...`.
 
 This is a one-time operation — the agent remembers across threads. See the guide's [full instructions](docs/known-issues.md#using-this-guide-with-the-agent) for details.
 
@@ -896,7 +1051,8 @@ not sufficient evidence.
 
 | Connector or integration | Test prompt | Expected result |
 |---|---|---|
-| **Code Access** | `Read codeRefs/<customer-repo>/README.md and return its H1 heading and the names of its top-level directories. Do not modify any files.` | The answer matches the connected customer repository and cites the retrieved file. |
+| **Plugin skills and scripts** | `Run ls runtime-content/skills/plugins/*/live/user-investigation/ in the terminal and list the Python scripts it contains. Do not modify any files.` | The listing shows `SKILL.md`, `enrich_ips.py`, and `generate_html_report.py`: the scripts were installed with the plugin. |
+| **Code Access** (when configured) | `Read codeRefs/<customer-repo>/README.md and return its H1 heading and the names of its top-level directories. Do not modify any files.` | The answer matches the connected customer repository and cites the retrieved file. |
 | **Outlook Tools (Office 365 Outlook)** | `Send an HTML email to <test-mailbox> with subject "Azure SRE Agent connector test" and body "<strong>Outlook connector test passed.</strong>"` | The send tool succeeds and the message arrives with rendered HTML. |
 | **Microsoft Teams** | `Post an HTML message to <test-channel-or-chat> stating "Azure SRE Agent Teams connector test passed."` | The post tool succeeds and the message appears in the intended test destination. |
 | **Log Analytics Workspace** | `Using the connected Log Analytics workspace, list five available tables and return the workspace name and resource group.` | Results come from the intended Sentinel workspace rather than only the agent telemetry workspace. |
@@ -944,16 +1100,27 @@ Skill Builder content, or repository scripts.
 
 ### How the Sandbox Works
 
-In Azure SRE Agent, when a new conversation is started, a new thread is created. The agent's tool execution runs inside an isolated sandbox — a micro VM powered by Azure Dedicated Compute (ADC), separate from the reasoning engine. In the sandbox's workspace filesystem, under `codeRefs/`, the content of the GitHub or Azure DevOps repositories connected to the agent is cloned and made available for reading.
+In Azure SRE Agent, when a new conversation is started, a new thread is created. The agent's tool execution runs inside an isolated sandbox — a micro VM powered by Azure Dedicated Compute (ADC), separate from the reasoning engine. The sandbox terminal starts in the workspace root (`/root/sreagent/terminalRoot`), which contains:
 
-This means that when a skill needs to execute a Python script or load a companion data file (JSON, YAML), the file already exists on the sandbox filesystem at a predictable path such as `codeRefs/sec-sre-ag/<skill-name>/<filename>`.
+| Path (relative to the workspace root) | Content |
+|---|---|
+| `runtime-content/skills/plugins/<installation>/live/<skill>/` | The files of every skill installed by a plugin: `SKILL.md`, reference documents, Python scripts, and data files, at the installed commit |
+| `runtime-content/skills/extended/live/<skill>/` | The files of every skill created with Skill Builder (or `tools/deploy_skills.py`) |
+| `codeRefs/<repo>/` | Repositories connected through Code Access |
+| `tmp/` | Scratch files, including files materialized with `read_skill_file` |
+| `config.json` | Runtime configuration created by the skills (see [section 0](#0-runtime-configjson-created-on-first-skill-execution)) |
 
-### File Resolution Cascade (`codeRefs`-first)
+When a skill needs to execute a Python script or load a companion data file (JSON, YAML), the file therefore already exists on the sandbox filesystem, for a plugin installation at a path such as `runtime-content/skills/plugins/<installation>/live/<skill-name>/<filename>`.
 
-Every SKILL.md in this repository instructs the agent to resolve script and data files using a **mandatory three-step cascade** before execution:
+### File Resolution Cascade (installed-skill-first)
+
+Every SKILL.md that runs scripts instructs the agent to resolve its skill directory (`<SKILL_DIR>`) with a **mandatory cascade** before execution:
 
 ```
-1. codeRefs/sec-sre-ag/<skill-name>/<filename>
+1. Installed skill directory: the first of these that contains <filename>
+     runtime-content/skills/plugins/*/live/<skill-name>/   (plugin)
+     runtime-content/skills/extended/live/<skill-name>/    (Skill Builder)
+     codeRefs/*/skills/<skill-name>/                       (Code Access)
    → If found: use / execute directly from this path.
      Companion files (queries.yaml, JSON reference data, etc.) are co-located here.
 
@@ -961,20 +1128,26 @@ Every SKILL.md in this repository instructs the agent to resolve script and data
    → If found: use from this path (left over from a previous materialization
      in the same conversation).
 
-3. Neither found → materialize from Builder:
+3. Neither found → materialize:
    → read_skill_file("<skill-name>", "<filename>") — returns file content via API
    → CreateFile("tmp/<skill-name>/<filename>", <content>)
    → Repeat for ALL companion files the script depends on.
 ```
 
+Steps 1–2 run as one terminal command, for example:
+
+```bash
+for d in runtime-content/skills/plugins/*/live/user-investigation runtime-content/skills/extended/live/user-investigation codeRefs/*/skills/user-investigation tmp/user-investigation; do [ -f "$d/enrich_ips.py" ] && { echo "$d"; break; }; done
+```
+
 **Rules enforced in every SKILL.md:**
-- When a file is found in `codeRefs/`, execute it directly from there — do **not** copy it to `tmp/`.
-- When materializing from Builder (step 3), materialize **all** companion files the script depends on, not just the script itself.
+- When a file is found in the installed skill directory, execute it directly from there — do **not** copy it to `tmp/`, and never write outputs or `config.json` into that directory.
+- When materializing (step 3), materialize **all** companion files the script depends on, not just the script itself.
 - The `read_skill_file` tool returns file content via API but does **not** place files on the local filesystem. Running `python3 <script>.py` directly will fail with `No such file or directory` (exit code 2) unless the file has been resolved first.
 
 ### Why the Cascade?
 
-`codeRefs/` contains the latest version-controlled scripts with companion files co-located. Because the repository is cloned into the sandbox automatically, step 1 succeeds in the vast majority of cases, making execution fast and reliable. Steps 2 and 3 exist as fallbacks: step 2 reuses files already materialized earlier in the conversation, and step 3 fetches content from the Builder API as a last resort.
+The installed skill directory always holds the scripts of the installed skill version, with companion files co-located, so step 1 succeeds whenever the skills come from the plugin or from Skill Builder, and execution costs no tokens. Steps 2 and 3 exist as fallbacks: step 2 reuses files already materialized earlier in the conversation, and step 3 fetches content through the skill file API as a last resort.
 
 ### How Scripts Locate Their Own Files at Runtime
 
@@ -982,10 +1155,10 @@ Once the agent has resolved a script to a filesystem path and invokes it with `p
 
 | Pattern | Used by | Mechanism |
 |---|---|---|
-| **`Path(__file__).resolve().parent`** | Data-gathering scripts (`invoke_mitre_scan.py`, `invoke_ingestion_scan.py`, `analyze-identity-posture.py`, `enrich_ips.py`) | Resolves the directory containing the running script, then opens co-located files like `queries.yaml`, `mitre-attck-enterprise.json`, `known-kql-tables.json` via `script_dir / 'filename'`. Also walks up parent directories (6–10 levels) to find the root `config.json`. |
+| **`Path(__file__).resolve().parent`** | Data-gathering scripts (`invoke_mitre_scan.py`, `invoke_ingestion_scan.py`, `analyze-identity-posture.py`, `enrich_ips.py`) | Resolves the directory containing the running script, then opens co-located files like `queries.yaml`, `mitre-attck-enterprise.json`, `known-kql-tables.json` via `script_dir / 'filename'`. Also walks up to 10 parent directories to find the root `config.json` (the plugin path is 6 levels below the workspace root). |
 | **`sys.argv[1]`** | HTML report generators (`generate_html_report.py` in every skill), chart generators (`generate_charts.py`) | Receives the path to a JSON data file (or directory) as a positional CLI argument. The agent passes the path of the JSON it produced in the previous step. |
 
-No script manipulates `sys.path` or imports modules from other skill directories. Every script is self-contained. Shared utilities (e.g., `shared/enrich_ips.py`) are invoked as subprocesses, not imported.
+No script manipulates `sys.path` or imports modules from other skill directories. Every script is self-contained. Shared utilities (e.g., `enrich_ips.py`) are bundled into each skill that runs them and invoked as subprocesses, not imported.
 
 ### Dynamic `config.json` Creation
 
@@ -995,7 +1168,7 @@ Ten runtime skills listed in [Setup section 0](#0-runtime-configjson-created-on-
 2. **If missing or incomplete**, extracting environment values from the agent's own platform settings (`<azure_resource_access>`, `<log_analytics_access>`), asking the user for the tenant name, and discovering the resource group through the sandbox Azure CLI read tool.
 3. **Writing and validating** `config.json` at the runtime workspace root with `tenant_name`, `sentinel_workspace_id`, `subscription_id`, and `azure_mcp` fields.
 
-Scripts that consume the file find it by walking up from their own directory (up to 6–10 levels of parent directories). Because the runtime workspace root is an ancestor of both `codeRefs/sec-sre-ag/<skill>/` and `tmp/<skill>/`, the file is found regardless of which File Resolution cascade step resolved the script. The `api_tokens` object is left empty; API tokens are loaded from Key Vault or environment variables independently.
+Scripts that consume the file find it by walking up from their own directory (up to 10 levels of parent directories). Because the runtime workspace root is an ancestor of `runtime-content/skills/.../<skill>/`, `codeRefs/<repo>/skills/<skill>/`, and `tmp/<skill>/`, the file is found regardless of which File Resolution cascade step resolved the script. The `api_tokens` object is left empty; API tokens are loaded from Key Vault or environment variables independently.
 
 ---
 
@@ -1003,30 +1176,40 @@ Scripts that consume the file find it by walking up from their own directory (up
 
 ```
 sec-sre-ag/
-├── shared/                    ← Scripts shared across multiple skills
-├── <skill-name>/              ← Scripts and data to materialize for each skill
-└── .builder/                  ← Reference copies of SKILL.md files and LLM docs
-    └── <skill-name>/             (the authoritative version is in the Builder)
+├── plugin.json                ← Azure SRE Agent plugin manifest: imports skills/ and .mcp.json
+├── .mcp.json                  ← MCP servers the skills expect (kql-search-mcp, ms-learn-mcp)
+├── skills/                    ← One self-contained folder per skill
+│   └── <skill-name>/
+│       ├── SKILL.md           ← Skill instructions with YAML front matter (name, description)
+│       ├── *.md, *.yaml       ← Reference documents, KQL queries, widget manifests
+│       └── *.py, *.json       ← Scripts and data files the skill runs in the sandbox
+├── shared/                    ← Canonical copies of files bundled into several skills
+├── docs/                      ← Operator documentation (two files are also bundled into skills)
+├── setup/                     ← Permission scripts, KQL job, Logic App playbooks
+├── tools/                     ← setup_agent.py, plugin.py, deploy_skills.py
+└── .github/workflows/         ← CI: validates the plugin on every push and pull request
 ```
 
 ### Convention
 
 | Location | Content | Read by |
 |---|---|---|
-| `<skill>/` (root) | `.py` scripts, `.json` / `.yaml` data files read by scripts | Python interpreter |
-| `shared/` | Scripts shared across skills | Python interpreter |
-| `.builder/<skill>/` | SKILL.md, reference docs, KQL queries, svg-widgets.yaml | LLM via `read_skill_file` API |
+| `skills/<skill>/SKILL.md` and `*.md` | Skill instructions and reference documents | LLM, from the installed skill directory or through `read_skill_file` |
+| `skills/<skill>/*.py`, `*.json`, `*.yaml` | Scripts and the data files they read (co-located) | Python interpreter in the sandbox |
+| `shared/`, `docs/email-html-report.md`, `docs/teams-delivery.md` | Canonical versions of the files copied into several skills | `tools/plugin.py sync` |
 
-### Builder-only Files
-
-The files in `.builder/` are **backup / reference copies**. The authoritative version
-of all SKILL.md and LLM instruction files is the one in the agent's **Builder**
-(SRE Agent portal → Builder → Skills).
+Skill folders must be self-contained: the agent receives only the skill folder, so
+a link or script path outside it does not resolve. Edit shared files only in
+their canonical location and run `python tools/plugin.py sync`;
+`python tools/plugin.py check` (also run by CI) fails when a copy differs, when a
+front matter is not valid YAML, or when a link leaves the skill folder.
 
 ### Secrets
 
 API tokens and environment parameters are NOT in the repo.
 See `shared/.env.example` for the template of required environment variables.
+`tools/setup_agent.py` reads the connector and GitHub tokens only from
+environment variables.
 
 ---
 

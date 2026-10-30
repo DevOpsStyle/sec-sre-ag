@@ -14,7 +14,7 @@ under `codeRefs/` at runtime.
 
 | Option | Outcome |
 |--------|---------|
-| Supporting files in Builder | ❌ Builder stores text only (`deploy_skills.py` skips binary files), so the `.docx` template cannot be stored. Scripts would also have to go through the LLM context on every run. |
+| Skill files (plugin or Builder) | ❌ The skill files are text only (`deploy_skills.py` skips binary files), and the module is organization-specific: it does not belong in the public plugin |
 | Public repository | ❌ Exposes organization-specific content |
 | **Private repository connected to the agent** | ✅ Files, including binaries, are on disk under `codeRefs/<repo>/`. No token cost, versioned with git. |
 
@@ -85,7 +85,11 @@ curl -sL -H "Authorization: Bearer <token>" \
 
 ## Step 3 — Connect the private repository to the agent
 
-1. SRE Agent portal → your agent → **Settings / Code repositories** (GitHub connector).
+1. SRE Agent portal → your agent → **Builder > Code Access** (GitHub). Or, from a
+   clone of this repository, with the API:
+   `python tools/setup_agent.py --sub <SUB> --rg <RG> --agent <AGENT> --only code-access --code-repo <owner>/<private-repo>`
+   (when the agent is not signed in to GitHub yet, set `CODE_ACCESS_GITHUB_PAT` or
+   follow the sign-in URL the script prints).
 2. Add `<owner>/<private-repo>` with the credentials from the prerequisites.
 3. Open a **new** chat thread and ask the agent:
 
@@ -99,24 +103,24 @@ curl -sL -H "Authorization: Bearer <token>" \
 
 ## Step 4 — Deploy the updated skill
 
-The skill changes are in `.builder/incident-investigation/`:
+The skill changes are in `skills/incident-investigation/`:
 
 - `SKILL.md` has pointers: Skill Files table, USE-CACHE keywords, Output Modes row.
-- `technical-report-docx.md` is a new companion file with the full workflow.
+- `technical-report-docx.md` is a companion file with the full workflow.
 
-**Option A — script (recommended):**
+**Option A — plugin (recommended):** push the changes to the repository installed as a
+plugin. With automatic updates on, the agent picks up the new commit; otherwise open
+**Builder > Plugins**, select the plugin and update it.
+
+**Option B — Skill Builder deployment** (only on agents without the plugin):
 
 ```bash
-cd .builder/deploy
-python deploy_skills.py deploy --skills incident-investigation --dry-run
-python deploy_skills.py deploy --skills incident-investigation
+python tools/deploy_skills.py deploy --skills incident-investigation --dry-run
+python tools/deploy_skills.py deploy --skills incident-investigation
 ```
 
-This also deploys every other change in `.builder/incident-investigation/` that is newer than
+This also deploys every other change in `skills/incident-investigation/` that is newer than
 the version installed in Builder. Review the dry-run output first.
-
-**Option B — portal:** Builder → Skills → `incident-investigation` → paste the new `SKILL.md`, then
-add `technical-report-docx.md` as a supporting file with exactly that name.
 
 ## Step 5 — End-to-end test (synthetic data only)
 
@@ -144,9 +148,9 @@ Expected behavior:
 | `TEMPLATE_ENCRYPTED` / `Package not found` | Template protected by IRM or a sensitivity label with encryption | Step 1, then push again |
 | `ModuleNotFoundError: docx` | Sandbox missing deps | The skill runs `pip install python-docx jsonschema` automatically |
 | Validation error with JSON path | Field does not match the schema (e.g. taxonomy pattern) | The agent fixes the field and re-runs (max 3 attempts) |
-| Agent writes the DOCX manually or stops at the JSON | Old skill version in Builder | Step 4 |
+| Agent writes the DOCX manually or stops at the JSON | Old skill version installed | Step 4 |
 
 ## Updating the module
 
-Push changes to the private repository. The agent picks them up on the next clone/sync, so there is
-no Builder redeploy unless `technical-report-docx.md` or `SKILL.md` changes.
+Push changes to the private repository. The agent picks them up on the next clone/sync, so the
+skill needs no update unless `technical-report-docx.md` or `SKILL.md` changes.
