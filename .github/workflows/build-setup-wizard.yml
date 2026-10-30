@@ -1,14 +1,21 @@
 name: Build setup wizard
 
 # Builds SRE-Agent-Setup.exe (single file) and SRE-Agent-Setup-folder.zip with tools/wizard/build.ps1.
-# Every run uploads both as a workflow artifact; a version tag (v1.0.0, v1.1.0, ...) also attaches
-# them to the GitHub release of that tag, the download link to give to customers.
+# Every run keeps both files as a workflow artifact. Pushing a tag (any name, for example v1.0.0)
+# also publishes them in the GitHub release of that tag: the download link to give to customers.
+# For a tag that already exists, run this workflow manually (Actions > Build setup wizard >
+# Run workflow) and type the tag.
 
 on:
   push:
     branches: [main]
-    tags: ["v*"]
+    tags: ["*"]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag whose release receives the files (empty: only build)"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -17,9 +24,13 @@ jobs:
   build:
     runs-on: windows-latest
     permissions:
-      contents: write  # only used to attach the files to the release of a version tag
+      contents: write  # only used to publish the files in a release
+    env:
+      RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || inputs.tag }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - uses: actions/setup-python@v5
         with:
@@ -36,15 +47,15 @@ jobs:
             dist/SRE-Agent-Setup.exe
             dist/SRE-Agent-Setup-folder.zip
 
-      - name: Attach to the release
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Publish in the release
+        if: env.RELEASE_TAG != ''
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          gh release view $env:TAG *> $null
+          gh release view $env:RELEASE_TAG *> $null
           if ($LASTEXITCODE -ne 0) {
-            gh release create $env:TAG --title $env:TAG --notes "Download SRE-Agent-Setup.exe and double-click it. If your company blocks it, use SRE-Agent-Setup-folder.zip: extract it and double-click SRE-Agent-Setup.exe in the folder."
+            gh release create $env:RELEASE_TAG --title $env:RELEASE_TAG --notes "Download SRE-Agent-Setup.exe and double-click it. If your company blocks it, use SRE-Agent-Setup-folder.zip: extract it and double-click SRE-Agent-Setup.exe in the folder."
           }
-          gh release upload $env:TAG dist/SRE-Agent-Setup.exe dist/SRE-Agent-Setup-folder.zip --clobber
+          gh release upload $env:RELEASE_TAG dist/SRE-Agent-Setup.exe dist/SRE-Agent-Setup-folder.zip --clobber

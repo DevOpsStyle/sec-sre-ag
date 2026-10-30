@@ -92,7 +92,10 @@
       <select id="workspace"></select>
       <label class="field" for="kqlToken">GitHub token for the KQL search tools (optional)</label>
       <input type="password" id="kqlToken" autocomplete="off" placeholder="Leave empty to skip the KQL search tools">
-      <p class="hint">A fine-grained GitHub personal access token with read-only access. It is sent only to your agent.</p>
+      <p class="hint">A fine-grained GitHub personal access token with read-only access
+        (<a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener noreferrer">create it on GitHub</a>,
+        with <b>Repository access: Public repositories</b>). It is sent only to your agent. Without it the skills
+        still work, but the plugin page shows <i>Connector setup required</i>.</p>
     </div>
     <label class="check"><input type="checkbox" id="doKnowledge" checked>
       <span><b>Add the troubleshooting guide</b> to the agent knowledge base</span></label>

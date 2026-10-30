@@ -20,8 +20,10 @@ step is idempotent: run the script again at any time.
                   for example the private repository of the DOCX technical report module.
                   PUT {agentEndpoint}/api/v2/repos/{name}
 
-At the end it prints the steps that still need a person (OAuth connectors and the
-permission scripts in setup/), with the agent identity IDs already filled in.
+At the end it reports whether the plugin page still shows "Connector setup required"
+(an MCP server of .mcp.json without a connector), then prints the steps that still need
+a person (OAuth connectors and the permission scripts in setup/), with the agent
+identity IDs already filled in.
 
 Usage, from the repository root after `az login`:
     python tools/setup_agent.py --sub <SUB> --rg <RG> --agent <AGENT> --dry-run
@@ -79,6 +81,7 @@ KQL_TOOLS = (
     "get_query_documentation", "list_table_categories", "get_tables_by_category",
 )
 SECRET_ENV_VARS = ("KQL_SEARCH_GITHUB_TOKEN", "PLUGIN_GITHUB_PAT", "CODE_ACCESS_GITHUB_PAT")
+GITHUB_TOKEN_PAGE = "https://github.com/settings/personal-access-tokens/new"
 
 
 # --------------------------------------------------------------------------- #
@@ -346,8 +349,11 @@ def step_connectors(agent: Agent, args, cfg: dict, report: Report) -> None:
         if KQL_CONNECTOR in existing:
             report.add(KQL_CONNECTOR, "OK", "kept the existing connector (give a GitHub token to update it)")
         else:
-            report.add(KQL_CONNECTOR, "MANUAL", "no GitHub token: give a read-only fine-grained token (wizard field, "
-                                                "or KQL_SEARCH_GITHUB_TOKEN) and run the connectors step again")
+            report.add(KQL_CONNECTOR, "MANUAL", "not created: no GitHub token. The skills work without it, but the "
+                                                "plugin page shows 'Connector setup required' until it exists. Create "
+                                                f"a read-only fine-grained token ({GITHUB_TOKEN_PAGE}, Repository "
+                                                "access: Public repositories) and run the connectors step again with "
+                                                "it (wizard field, or KQL_SEARCH_GITHUB_TOKEN)")
         return
     envs = {"GITHUB_TOKEN": token}
     if os.environ.get("KQL_SEARCH_FAVORITE_REPOS"):
@@ -419,6 +425,31 @@ def step_code_access(agent: Agent, args, cfg: dict, report: Report) -> None:
             report.add(f"code access {repo}", "OK", f"connected as codeRefs/{name}/ (cloning starts now)")
         else:
             report.add(f"code access {repo}", "FAILED", f"HTTP {status}: {redact(body)}")
+
+
+# --------------------------------------------------------------------------- #
+# Plugin page banner
+# --------------------------------------------------------------------------- #
+def plugin_connector_status(agent: Agent, args, cfg: dict, report: Report) -> None:
+    """Report the MCP servers of the plugin that have no connector, as the plugin page does.
+
+    The plugin page shows "Connector setup required" while the installation lists them in
+    mcpConnectorStatus.missing. Servers declared by URL without authentication headers
+    (ms-learn-mcp) are not tracked there.
+    """
+    if not args.repo:
+        return
+    path = args.path if args.path is not None else cfg.get("pluginPath", "")
+    status = (find_installation(agent, args.repo, path) or {}).get("mcpConnectorStatus") or {}
+    if not status.get("knownStatus"):
+        return
+    print("\nPlugin page")
+    missing = status.get("missing") or []
+    if missing:
+        report.add("plugin page", "MANUAL", "shows 'Connector setup required' until these connectors exist: "
+                                            f"{', '.join(missing)} (see the items above)")
+    else:
+        report.add("plugin page", "OK", "every MCP server of the plugin has a connector")
 
 
 # --------------------------------------------------------------------------- #
@@ -501,6 +532,8 @@ def run(args: argparse.Namespace) -> tuple[int, Report, list[str]]:
     if "code-access" in steps:
         print("\n[4/4] Code Access")
         step_code_access(agent, args, cfg, report)
+    if "plugin" in steps or "connectors" in steps:
+        plugin_connector_status(agent, args, cfg, report)
 
     lines = manual_steps(agent, cfg, args.repo)
     print("\n" + "\n".join(lines))

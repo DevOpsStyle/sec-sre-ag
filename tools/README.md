@@ -32,9 +32,15 @@ Python nor Azure CLI, and nothing is installed.
    pick the Sentinel workspace; paste a read-only GitHub token to add the KQL search
    tools), and add the troubleshooting guide. Code Access, a different plugin
    repository and private-repository tokens are under *Advanced options*.
+   To create the GitHub token: github.com > **Settings > Developer settings >
+   Personal access tokens > Fine-grained tokens > Generate new token**, with
+   **Repository access: Public repositories (read-only)**. Without it, the plugin
+   page keeps showing *Connector setup required* for `kql-search-mcp`.
 5. Select **Configure the agent**, with **Preview only** first if you want to see the
    planned changes. Each item shows OK, MANUAL (something to complete), WARN or
-   FAILED; *Show details* displays the full log.
+   FAILED; *Show details* displays the full log. The *plugin page* item tells whether
+   the plugin page in the portal still shows *Connector setup required*, and for
+   which connector.
 6. **What is left to do** lists the permission commands, with the agent identity and
    the Sentinel workspace already filled in: copy them into Azure Cloud Shell. Then
    connect Outlook and Teams in the portal, and select **Close the wizard**.
@@ -59,9 +65,12 @@ activity.
 
 1. Push to `main`: the [Build setup wizard](../.github/workflows/build-setup-wizard.yml)
    workflow builds both files and keeps them as a workflow artifact.
-2. Create a version tag, for example `git tag v1.0.0 && git push origin v1.0.0`: the
-   workflow attaches `SRE-Agent-Setup.exe` and `SRE-Agent-Setup-folder.zip` to the
-   release of that tag. Give customers the link to the latest release.
+2. Push a tag with any name, for example `git tag v1.0.0 && git push origin v1.0.0`, or
+   create a release with a new tag on the GitHub **Releases** page: the workflow
+   publishes `SRE-Agent-Setup.exe` and `SRE-Agent-Setup-folder.zip` in the release of
+   that tag. For a tag created before this workflow existed, open **Actions > Build
+   setup wizard > Run workflow** and type the tag. Give customers the link to the
+   latest release: `https://github.com/<owner>/<repo>/releases/latest`.
 3. Each build installs, by default, the plugin from the repository that built it
    (customers can change it under *Advanced options*).
 4. Recommended before giving it to customers: sign both executables with a
@@ -122,7 +131,10 @@ python tools/setup_agent.py --sub <SUB> --rg <RG> --agent <AGENT>
 | 3. `knowledge` | Uploads `docs/known-issues.md` to the agent knowledge base | `POST {endpoint}/api/v1/agentmemory/upload` |
 | 4. `code-access` | Optional, only with `--code-repo <owner>/<repo>`: connects GitHub repositories through Code Access, for example the private repository of the DOCX technical report module | `PUT {endpoint}/api/v2/repos/{name}` |
 
-At the end the script prints what still needs a person, with the identity IDs
+At the end the script reports whether the plugin page still shows *Connector setup
+required*: it reads `mcpConnectorStatus` of the plugin installation
+(`GET {endpoint}/api/v2/plugins/installations`), the same status the portal shows.
+Then it prints what still needs a person, with the identity IDs
 already filled in: the permission scripts in [`../setup`](../setup) and the Outlook
 and Teams connectors, which require an interactive OAuth sign-in.
 
@@ -140,7 +152,7 @@ Secrets are read only from environment variables, never from the command line:
 
 | Variable | Needed for |
 |---|---|
-| `KQL_SEARCH_GITHUB_TOKEN` | `kql-search-mcp`: a fine-grained GitHub PAT with read-only access. Without it the connector is skipped |
+| `KQL_SEARCH_GITHUB_TOKEN` | `kql-search-mcp`: a fine-grained GitHub PAT with read-only access. Without it the connector is skipped, and the plugin page shows *Connector setup required* |
 | `KQL_SEARCH_FAVORITE_REPOS` | Optional `FAVORITE_REPOS` for `kql-search-mcp` |
 | `PLUGIN_GITHUB_PAT` | Only when the plugin repository is private |
 | `CODE_ACCESS_GITHUB_PAT` | Only for `--code-repo` when the agent is not signed in to GitHub yet. Otherwise the script prints the OAuth sign-in URL |

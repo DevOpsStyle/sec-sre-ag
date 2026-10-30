@@ -60,6 +60,15 @@ anyway**. If your company blocks the program, use `SRE-Agent-Setup-folder.zip` f
 the same release (extract it and double-click `SRE-Agent-Setup.exe` in the folder)
 or follow the steps below. See the [wizard guide](tools/README.md#sre-agent-setupexe--the-setup-wizard).
 
+> **"Connector setup required" on the plugin page** is a reminder, not an error.
+> Installing a plugin never creates connectors, so the page shows this banner
+> while an MCP server declared in [`.mcp.json`](.mcp.json) has no connector. Here
+> that is `kql-search-mcp`, created only when you give a read-only GitHub token
+> (wizard step 3, `KQL_SEARCH_GITHUB_TOKEN`, or by hand as in
+> [`kql-search-mcp`](#kql-search-mcp)). The banner does not track `ms-learn-mcp`,
+> a server without authentication. The skills work without `kql-search-mcp`;
+> only KQL schema lookups, query validation and examples are missing.
+
 The same setup, step by step:
 
 1. **Install the plugin** (portal, two minutes):
@@ -742,8 +751,9 @@ python tools/setup_agent.py --sub <SUB> --rg <RG> --agent <AGENT>
 | Knowledge base | Uploads [`docs/known-issues.md`](docs/known-issues.md) to the agent knowledge base (see [section 7](#7-known-issues--memory-seeding)) |
 | Code Access (optional) | `--code-repo <owner>/<repo>` connects a repository, for example the private DOCX module |
 
-The script is idempotent. At the end it prints the remaining manual steps with
-the agent identity IDs already filled in: the permission scripts of
+The script is idempotent. At the end it reports whether the plugin page still shows
+*Connector setup required* (and for which connector), then prints the remaining
+manual steps with the agent identity IDs already filled in: the permission scripts of
 [step C](#c-discover-the-required-ids-and-assign-permissions-to-the-agents-uami)
 and the Outlook and Teams connectors of [step D](#d-configure-code-access-and-connectors).
 See the [tools guide](tools/README.md) for every option and environment variable.
