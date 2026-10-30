@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Azure SRE Agent - security skills setup</title>
+<style>
+  :root { --bg: #f5f6f8; --card: #fff; --text: #1b1b1f; --muted: #5f6368; --accent: #0f6cbd; --ok: #107c10;
+          --warn: #b35c00; --err: #c50f1f; --border: #e1e3e6; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Segoe UI", system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); }
+  header { background: #1b1b1f; color: #fff; padding: 18px 24px; }
+  header h1 { margin: 0; font-size: 20px; font-weight: 600; }
+  header p { margin: 4px 0 0; color: #c8c8c8; font-size: 14px; }
+  main { max-width: 880px; margin: 24px auto; padding: 0 16px 48px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 20px 24px; margin-bottom: 16px; }
+  .card.disabled { opacity: .5; pointer-events: none; }
+  .card h2 { margin: 0 0 4px; font-size: 17px; display: flex; align-items: center; gap: 10px; }
+  .num { display: inline-flex; width: 26px; height: 26px; border-radius: 50%; background: var(--accent); color: #fff;
+         font-size: 14px; align-items: center; justify-content: center; flex: none; }
+  .done .num { background: var(--ok); }
+  .hint { color: var(--muted); font-size: 13px; margin: 4px 0 8px; font-weight: 400; }
+  label.field { display: block; font-weight: 600; font-size: 14px; margin: 14px 0 4px; }
+  select, input[type=text], input[type=password] { width: 100%; padding: 8px 10px; border: 1px solid #c4c7cc;
+         border-radius: 4px; font: inherit; font-size: 14px; background: #fff; }
+  .check { display: flex; gap: 10px; align-items: flex-start; margin: 14px 0 4px; font-size: 14px; }
+  .check input { margin-top: 3px; }
+  .indent { margin-left: 26px; }
+  button { font: inherit; font-size: 14px; padding: 8px 18px; border-radius: 4px; border: 1px solid var(--accent);
+           background: var(--accent); color: #fff; cursor: pointer; }
+  button.secondary { background: #fff; color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  .row { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin-top: 14px; }
+  .status { font-size: 14px; }
+  .error { color: var(--err); }
+  .warning { color: var(--warn); }
+  .kv { display: grid; grid-template-columns: 170px 1fr; gap: 6px 12px; font-size: 14px; margin-top: 14px; }
+  .kv > div:nth-child(odd) { color: var(--muted); }
+  details summary { cursor: pointer; color: var(--accent); font-size: 14px; margin-top: 14px; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; margin-top: 14px; }
+  td { padding: 7px 8px; border-top: 1px solid var(--border); vertical-align: top; }
+  td.badge-cell { width: 96px; }
+  .badge { display: inline-block; min-width: 80px; text-align: center; padding: 2px 8px; border-radius: 10px;
+           font-size: 12px; font-weight: 600; color: #fff; background: #8a8886; }
+  .b-OK { background: var(--ok); } .b-DRY-RUN { background: var(--accent); }
+  .b-MANUAL, .b-WARN { background: var(--warn); } .b-FAILED { background: var(--err); }
+  pre { background: #1b1b1f; color: #e8e8e8; padding: 12px; border-radius: 6px; overflow: auto; font-size: 12.5px;
+        max-height: 340px; white-space: pre-wrap; word-break: break-word; }
+  a { color: var(--accent); }
+  footer { text-align: center; color: var(--muted); font-size: 13px; }
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid #c4c7cc; border-top-color: var(--accent);
+             border-radius: 50%; animation: spin 1s linear infinite; vertical-align: -2px; margin-right: 8px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Azure SRE Agent &mdash; security skills setup</h1>
+  <p>Installs the sec-sre-ag skills on your agent and configures what they need. Nothing is installed on this computer.</p>
+</header>
+<main>
+  <section class="card" id="step1">
+    <h2><span class="num">1</span>Sign in to Azure</h2>
+    <p class="hint">Use an account with the <b>SRE Agent Administrator</b> role on the agent. The Microsoft sign-in page opens in a new browser tab.</p>
+    <div class="row"><button id="signin">Sign in</button><span id="signinStatus" class="status"></span></div>
+    <details id="tenantBox">
+      <summary>My subscription is in another directory</summary>
+      <label class="field" for="tenant">Directory (tenant) ID or domain</label>
+      <input type="text" id="tenant" placeholder="contoso.onmicrosoft.com" autocomplete="off" spellcheck="false">
+    </details>
+  </section>
+
+  <section class="card disabled" id="step2">
+    <h2><span class="num">2</span>Choose the agent</h2>
+    <label class="field" for="sub">Subscription</label>
+    <select id="sub"></select>
+    <p class="hint" id="subHint"></p>
+    <label class="field" for="agent">Azure SRE Agent</label>
+    <select id="agent"></select>
+    <div id="agentInfo"></div>
+  </section>
+
+  <section class="card disabled" id="step3">
+    <h2><span class="num">3</span>Choose what to configure</h2>
+    <label class="check"><input type="checkbox" id="doPlugin" checked>
+      <span><b>Install the security skills</b> &mdash; the plugin from GitHub, with all the scripts the skills run
+        <span class="hint" id="pluginHint" style="display:block"></span></span></label>
+    <label class="check"><input type="checkbox" id="doConnectors" checked>
+      <span><b>Connect Microsoft Sentinel and the documentation tools</b></span></label>
+    <div class="indent" id="connectorOptions">
+      <label class="field" for="workspace">Microsoft Sentinel workspace</label>
+      <select id="workspace"></select>
+      <label class="field" for="kqlToken">GitHub token for the KQL search tools (optional)</label>
+      <input type="password" id="kqlToken" autocomplete="off" placeholder="Leave empty to skip the KQL search tools">
+      <p class="hint">A fine-grained GitHub personal access token with read-only access. It is sent only to your agent.</p>
+    </div>
+    <label class="check"><input type="checkbox" id="doKnowledge" checked>
+      <span><b>Add the troubleshooting guide</b> to the agent knowledge base</span></label>
+    <details>
+      <summary>Advanced options</summary>
+      <label class="field" for="repo">GitHub repository of the plugin (owner/name)</label>
+      <input type="text" id="repo" autocomplete="off" spellcheck="false">
+      <label class="field" for="pluginToken">GitHub token, only if that repository is private</label>
+      <input type="password" id="pluginToken" autocomplete="off">
+      <label class="check"><input type="checkbox" id="doCode">
+        <span><b>Connect repositories through Code Access</b> (only for the optional DOCX report module)</span></label>
+      <div class="indent">
+        <label class="field" for="codeRepos">Repositories (owner/name, separated by commas)</label>
+        <input type="text" id="codeRepos" autocomplete="off" spellcheck="false" placeholder="contoso/private-module">
+        <label class="field" for="codeToken">GitHub token for Code Access, only if the agent is not signed in to GitHub</label>
+        <input type="password" id="codeToken" autocomplete="off">
+      </div>
+    </details>
+    <label class="check"><input type="checkbox" id="dryRun">
+      <span>Preview only: show what would change, without changing anything</span></label>
+  </section>
+
+  <section class="card disabled" id="step4">
+    <h2><span class="num">4</span>Configure the agent</h2>
+    <div class="row"><button id="run">Configure the agent</button><span id="runStatus" class="status"></span></div>
+    <div id="results"></div>
+    <details id="logBox"><summary>Show details</summary><pre id="log"></pre></details>
+  </section>
+
+  <section class="card" id="manualCard" hidden>
+    <h2>What is left to do</h2>
+    <p class="hint">These steps need a person with administrative rights, so the wizard cannot do them.
+      Run the commands in Azure Cloud Shell (Bash).</p>
+    <pre id="manual"></pre>
+    <div class="row">
+      <button class="secondary" id="copyManual">Copy the commands</button>
+      <a href="https://shell.azure.com" target="_blank" rel="noopener noreferrer">Open Azure Cloud Shell</a>
+      <a href="https://sre.azure.com" target="_blank" rel="noopener noreferrer">Open the Azure SRE Agent portal</a>
+    </div>
+  </section>
+
+  <footer>
+    <button class="secondary" id="close">Close the wizard</button>
+    <p id="version"></p>
+  </footer>
+</main>
+<script>
+"use strict";
+const SESSION = new URLSearchParams(location.search).get("s") || "";
+const $ = (id) => document.getElementById(id);
+const enc = encodeURIComponent;
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+let current = null;
+
+async function api(method, path, body) {
+  let res;
+  try {
+    res = await fetch(path, {method, headers: {"X-Wizard-Session": SESSION, "Content-Type": "application/json"},
+                             body: body ? JSON.stringify(body) : undefined});
+  } catch (e) {
+    throw new Error("The wizard is not running any more. Start SRE-Agent-Setup.exe again.");
+  }
+  let data = {};
+  try { data = await res.json(); } catch (e) { /* empty body */ }
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  return data;
+}
+
+function setStatus(el, text, kind) {
+  el.replaceChildren();
+  if (kind === "busy") { const s = document.createElement("span"); s.className = "spinner"; el.appendChild(s); }
+  const t = document.createElement("span");
+  t.textContent = text;
+  if (kind === "error" || kind === "warning") t.className = kind;
+  el.appendChild(t);
+}
+function enable(id, on) { $(id).classList.toggle("disabled", !on); }
+function addOption(select, value, text) {
+  const o = document.createElement("option"); o.value = value; o.textContent = text; select.appendChild(o); return o;
+}
+
+async function init() {
+  if (!SESSION) {
+    document.querySelector("main").textContent = "Start the wizard by opening SRE-Agent-Setup.exe.";
+    return;
+  }
+  const st = await api("GET", "/api/state");
+  $("repo").value = st.defaults.repo || "";
+  $("tenant").value = st.defaults.tenant || "";
+  $("version").textContent = `Version ${st.defaults.version}`;
+  updatePluginHint();
+  if (st.defaults.mode === "azure-cli") $("signin").textContent = "Use my Azure CLI sign-in";
+  if (st.signedIn) await afterSignIn(st.user);
+}
+
+function updatePluginHint() {
+  const repo = $("repo").value.trim();
+  $("pluginHint").textContent = repo ? `From github.com/${repo}` : "Set the repository under Advanced options.";
+}
+$("repo").addEventListener("input", updatePluginHint);
+$("doConnectors").addEventListener("change", () => { $("connectorOptions").hidden = !$("doConnectors").checked; });
+
+$("signin").onclick = async () => {
+  $("signin").disabled = true;
+  setStatus($("signinStatus"), "Complete the sign-in in the new browser tab...", "busy");
+  try {
+    await api("POST", "/api/signin", {tenant: $("tenant").value.trim()});
+    for (;;) {
+      await sleep(1000);
+      const st = await api("GET", "/api/state");
+      if (st.signingIn) continue;
+      if (st.signedIn) return afterSignIn(st.user);
+      throw new Error(st.error || "The sign-in did not complete.");
+    }
+  } catch (e) {
+    setStatus($("signinStatus"), e.message, "error");
+    $("signin").disabled = false;
+  }
+};
+
+async function afterSignIn(user) {
+  $("signin").disabled = true;
+  $("step1").classList.add("done");
+  setStatus($("signinStatus"), `Signed in as ${user || "your account"}`);
+  enable("step2", true);
+  setStatus($("subHint"), "Loading your subscriptions...", "busy");
+  try {
+    const data = await api("GET", "/api/subscriptions");
+    const sel = $("sub");
+    sel.replaceChildren();
+    addOption(sel, "", data.subscriptions.length ? "Select a subscription" : "No subscription found for this account");
+    for (const s of data.subscriptions) addOption(sel, s.id, `${s.name} (${s.id})`);
+    $("subHint").textContent = data.skippedTenants.length
+      ? `Some directories need a separate sign-in (${data.skippedTenants.join(", ")}): use "My subscription is in another directory" in step 1.`
+      : "";
+    if (data.subscriptions.length === 1) { sel.value = data.subscriptions[0].id; await loadAgents(); }
+  } catch (e) { setStatus($("subHint"), e.message, "error"); }
+}
+
+$("sub").onchange = loadAgents;
+async function loadAgents() {
+  const sub = $("sub").value;
+  const sel = $("agent");
+  sel.replaceChildren(); $("agentInfo").replaceChildren(); current = null;
+  enable("step3", false); enable("step4", false);
+  if (!sub) return;
+  addOption(sel, "", "Loading...");
+  try {
+    const data = await api("GET", `/api/agents?sub=${enc(sub)}`);
+    sel.replaceChildren();
+    addOption(sel, "", data.agents.length ? "Select an agent" : "No Azure SRE Agent in this subscription");
+    for (const a of data.agents) addOption(sel, `${a.resourceGroup}/${a.name}`, `${a.name} (resource group ${a.resourceGroup}, ${a.location})`);
+    if (data.agents.length === 1) { sel.selectedIndex = 1; await loadAgent(); }
+  } catch (e) {
+    sel.replaceChildren(); addOption(sel, "", "Cannot list the agents");
+    setStatus($("agentInfo"), e.message, "error");
+  }
+}
+
+$("agent").onchange = loadAgent;
+async function loadAgent() {
+  const value = $("agent").value;
+  current = null; $("agentInfo").replaceChildren();
+  enable("step3", false); enable("step4", false);
+  if (!value) return;
+  const [rg, name] = value.split("/");
+  const sub = $("sub").value;
+  setStatus($("agentInfo"), "Reading the agent configuration...", "busy");
+  try {
+    const d = await api("GET", `/api/agent?sub=${enc(sub)}&rg=${enc(rg)}&name=${enc(name)}&repo=${enc($("repo").value.trim())}`);
+    current = {sub, rg, name, details: d};
+    renderAgent(d);
+    fillWorkspaces(d);
+    enable("step3", true); enable("step4", true);
+  } catch (e) { setStatus($("agentInfo"), e.message, "error"); }
+}
+
+function renderAgent(d) {
+  const box = $("agentInfo");
+  box.replaceChildren();
+  const kv = document.createElement("div");
+  kv.className = "kv";
+  const add = (key, value, cls) => {
+    const k = document.createElement("div"); k.textContent = key;
+    const v = document.createElement("div"); v.textContent = value; if (cls) v.className = cls;
+    kv.append(k, v);
+  };
+  const running = /running/i.test(d.state || "");
+  add("Status", d.state || "unknown", running ? "" : "error");
+  add("Managed identity", d.identity.name || "system-assigned only");
+  add("Security skills", d.plugin.installed ? `installed (commit ${d.plugin.commit || "?"}, ${d.plugin.skills} skills)` : "not installed yet");
+  add("Connectors", d.connectors.length ? d.connectors.join(", ") : "none yet");
+  box.appendChild(kv);
+  if (!running) {
+    const p = document.createElement("p");
+    p.className = "error";
+    p.textContent = "The agent is not running: start it in the Azure SRE Agent portal, then select it again.";
+    box.appendChild(p);
+  }
+}
+
+function fillWorkspaces(d) {
+  const sel = $("workspace");
+  sel.replaceChildren();
+  if (d.logAnalyticsConnectors.length) addOption(sel, "", `Keep the existing connector (${d.logAnalyticsConnectors.join(", ")})`);
+  for (const w of d.workspaces) {
+    const parts = w.split("/");
+    addOption(sel, w, `${parts[parts.length - 1]} (resource group ${parts[4]})`);
+  }
+  if (!sel.options.length) addOption(sel, "", "No Microsoft Sentinel workspace found in this subscription");
+}
+
+$("run").onclick = async () => {
+  if (!current) return;
+  const steps = [];
+  if ($("doPlugin").checked) steps.push("plugin");
+  if ($("doConnectors").checked) steps.push("connectors");
+  if ($("doKnowledge").checked) steps.push("knowledge");
+  if ($("doCode").checked) steps.push("code-access");
+  if (!steps.length) return setStatus($("runStatus"), "Select at least one item in step 3.", "error");
+  const dryRun = $("dryRun").checked;
+  const body = {
+    sub: current.sub, rg: current.rg, agent: current.name, repo: $("repo").value.trim(),
+    workspace: $("doConnectors").checked ? $("workspace").value : "", steps, dryRun,
+    codeRepos: $("doCode").checked ? $("codeRepos").value.split(/[\s,;]+/).filter(Boolean) : [],
+    kqlToken: $("kqlToken").value, pluginToken: $("pluginToken").value, codeAccessToken: $("codeToken").value,
+  };
+  $("run").disabled = true; enable("step2", false); enable("step3", false);
+  $("results").replaceChildren(); $("log").textContent = ""; $("manualCard").hidden = true;
+  setStatus($("runStatus"), dryRun ? "Preparing the preview..." : "Configuring the agent. This can take a few minutes...", "busy");
+  try {
+    await api("POST", "/api/run", body);
+    let job;
+    for (;;) {
+      await sleep(1000);
+      job = await api("GET", "/api/job");
+      $("log").textContent = job.log;
+      if (!job.running) break;
+    }
+    renderResults(job);
+  } catch (e) {
+    setStatus($("runStatus"), e.message, "error");
+  } finally {
+    $("run").disabled = false; enable("step2", true); enable("step3", true);
+  }
+};
+
+function renderResults(job) {
+  if (job.error) {
+    setStatus($("runStatus"), job.error, "error");
+    $("logBox").open = true;
+  } else if (job.code === 0) {
+    const attention = !job.dryRun && job.rows.some((r) => r.status === "MANUAL" || r.status === "WARN");
+    setStatus($("runStatus"), job.dryRun ? "Preview complete: nothing was changed." :
+      (attention ? "Done, with some items to check below." : "Done."), attention ? "warning" : "");
+    $("step4").classList.toggle("done", !job.dryRun);
+  } else {
+    setStatus($("runStatus"), "Completed with errors: see the items in red.", "error");
+  }
+  if (job.rows.length) {
+    const table = document.createElement("table");
+    for (const r of job.rows) {
+      const tr = table.insertRow();
+      const badge = document.createElement("span");
+      badge.className = `badge b-${r.status}`;
+      badge.textContent = r.status;
+      const c1 = tr.insertCell(); c1.className = "badge-cell"; c1.appendChild(badge);
+      const c2 = tr.insertCell();
+      const b = document.createElement("b"); b.textContent = r.item; c2.appendChild(b);
+      if (r.detail) { const d = document.createElement("div"); d.className = "hint"; d.textContent = r.detail; c2.appendChild(d); }
+    }
+    $("results").replaceChildren(table);
+  }
+  if (job.manual.length) {
+    $("manual").textContent = job.manual.join("\n");
+    $("manualCard").hidden = false;
+  }
+}
+
+$("copyManual").onclick = async () => {
+  try {
+    await navigator.clipboard.writeText($("manual").textContent);
+    $("copyManual").textContent = "Copied";
+  } catch (e) {
+    const range = document.createRange(); range.selectNodeContents($("manual"));
+    const sel = getSelection(); sel.removeAllRanges(); sel.addRange(range);
+  }
+};
+
+$("close").onclick = async () => {
+  try { await api("POST", "/api/exit"); } catch (e) { /* already stopped */ }
+  document.querySelector("main").textContent = "The wizard is closed. You can close this browser tab.";
+};
+
+init().catch((e) => setStatus($("signinStatus"), e.message, "error"));
+</script>
+</body>
+</html>

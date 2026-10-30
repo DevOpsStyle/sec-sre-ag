@@ -1,13 +1,83 @@
 # Tools
 
-Command-line tools for the Azure SRE Agent plugin in this repository. Run them
-from the repository root.
+Tools for the Azure SRE Agent plugin in this repository. Run the Python tools from
+the repository root.
 
 | Tool | What it does | When to use it |
 |---|---|---|
+| [`SRE-Agent-Setup.exe`](#sre-agent-setupexe--the-setup-wizard) ([`wizard/`](wizard)) | A web page that does what `setup_agent.py` does, for people who do not use Python: sign in, choose the agent, configure | Give it to customers: nothing to install |
 | [`setup_agent.py`](setup_agent.py) | Installs the plugin from GitHub and configures, through the Azure SRE Agent REST APIs, everything a plugin cannot install: connectors, knowledge base and, optionally, Code Access | First setup of an agent, and whenever you want to re-apply the configuration |
 | [`plugin.py`](plugin.py) | Copies the shared files into the skills (`sync`) and validates the plugin as strictly as the plugin importer (`check`) | After every change to `skills/`, `shared/` or the shared documents in `docs/` |
 | [`deploy_skills.py`](deploy_skills.py) | Pushes the skills to Skill Builder instead of installing the plugin | Only if you do not use the plugin on that agent |
+
+## `SRE-Agent-Setup.exe` — the setup wizard
+
+A portable Windows program for customers who do not know Python. It contains its
+own Python runtime and the logic of `setup_agent.py`, so the computer needs neither
+Python nor Azure CLI, and nothing is installed.
+
+**Use it:**
+
+1. Download `SRE-Agent-Setup.exe` from the latest release of the repository and
+   double-click it. A small window stays open while the wizard runs, and a page
+   opens in the default browser.
+2. **Sign in**: the Microsoft sign-in page opens in a new tab. Use an account with
+   **SRE Agent Administrator** on the agent. If the subscription is in another
+   directory, enter its tenant ID or domain under *My subscription is in another
+   directory* first.
+3. **Choose** the subscription and the agent. The page shows the agent status, its
+   identity, the installed connectors and whether the skills are already installed.
+4. **Choose what to configure**: install the skills (plugin), connect Microsoft
+   Sentinel and the documentation tools (keep the existing Log Analytics connector or
+   pick the Sentinel workspace; paste a read-only GitHub token to add the KQL search
+   tools), and add the troubleshooting guide. Code Access, a different plugin
+   repository and private-repository tokens are under *Advanced options*.
+5. Select **Configure the agent**, with **Preview only** first if you want to see the
+   planned changes. Each item shows OK, MANUAL (something to complete), WARN or
+   FAILED; *Show details* displays the full log.
+6. **What is left to do** lists the permission commands, with the agent identity and
+   the Sentinel workspace already filled in: copy them into Azure Cloud Shell. Then
+   connect Outlook and Teams in the portal, and select **Close the wizard**.
+
+**If Windows stops it:**
+
+| Message | What to do |
+|---|---|
+| *Windows protected your PC* (SmartScreen) | Select **More info > Run anyway**. The message disappears when the file is signed (see below) |
+| *An Application Control policy has blocked this file*, or *Your organization used ... to block this app* | The single-file program unpacks itself into the Temp folder, which many companies block. Download `SRE-Agent-Setup-folder.zip` from the same release, extract it into a folder where you can run programs, and double-click `SRE-Agent-Setup.exe` in it. If that is blocked too, ask IT to allow or sign it, or follow the portal steps in the main README |
+| The antivirus quarantines the file | A false positive that is common with packaged Python programs: sign the file, or report it to the antivirus vendor |
+
+**Security:** the page is served only on `127.0.0.1`, and every request must carry
+the random session code in the page address. The sign-in uses the Microsoft
+identity platform in your browser (MSAL with the public client ID of Azure CLI,
+the default of the Azure Identity libraries); access tokens and the GitHub tokens
+you type stay in memory, are sent only to Azure SRE Agent, and are never written to
+disk or to the log. The wizard stops when you close it, or after two hours without
+activity.
+
+**Publish it for customers** (maintainers):
+
+1. Push to `main`: the [Build setup wizard](../.github/workflows/build-setup-wizard.yml)
+   workflow builds both files and keeps them as a workflow artifact.
+2. Create a version tag, for example `git tag v1.0.0 && git push origin v1.0.0`: the
+   workflow attaches `SRE-Agent-Setup.exe` and `SRE-Agent-Setup-folder.zip` to the
+   release of that tag. Give customers the link to the latest release.
+3. Each build installs, by default, the plugin from the repository that built it
+   (customers can change it under *Advanced options*).
+4. Recommended before giving it to customers: sign both executables with a
+   code-signing certificate, for example with Azure Trusted Signing. Signed files
+   avoid the SmartScreen warning and most antivirus false positives.
+
+**Build it locally** (Windows, Python 3.10+): `pwsh tools/wizard/build.ps1`, or
+`-Repo <owner>/<repo>` to set the default plugin repository. The script creates
+`build/wizard/venv`, installs the pinned [requirements](wizard/requirements-build.txt)
+and writes `dist/SRE-Agent-Setup.exe` and `dist/SRE-Agent-Setup-folder.zip`.
+
+**Run it without packaging** (developers): `python -m pip install -r
+tools/wizard/requirements.txt`, then `python tools/wizard/sre_setup_wizard.py`. Add
+`--use-azure-cli` to reuse an existing `az login` instead of the browser sign-in,
+`--tenant <tenant>` to sign in to another directory, and `--no-browser` to only
+print the page address.
 
 ## Requirements
 

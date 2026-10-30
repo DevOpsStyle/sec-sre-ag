@@ -55,8 +55,9 @@ DATAPLANE_RESOURCE = "https://azuresre.dev"
 # Data-plane REST path used by the portal to read/write skills.
 SKILLS_DATAPLANE_PATH = "/api/v2/extendedAgent/skills"
 
-# Folder that holds the skill folders (the same folder the plugin manifest imports).
-SKILLS_ROOT = Path(__file__).resolve().parent.parent / "skills"
+# Folder that holds the skill folders (the same folder the plugin manifest imports). Inside
+# SRE-Agent-Setup.exe (PyInstaller) the skills are bundled under the extraction folder.
+SKILLS_ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent)) / "skills"
 
 # The default file that every skill must contain; it carries the YAML front matter.
 DEFAULT_SKILL_FILE = "SKILL.md"
@@ -185,7 +186,19 @@ def load_local_skills(only: set[str] | None = None) -> list[Skill]:
 # --------------------------------------------------------------------------- #
 # Auth + HTTP
 # --------------------------------------------------------------------------- #
+# Optional replacement for the Azure CLI, used by the setup wizard (tools/wizard) that signs
+# in with the browser: callable(resource, subscription) -> access token.
+_token_provider = None
+
+
+def set_token_provider(provider) -> None:
+    global _token_provider
+    _token_provider = provider
+
+
 def get_token(resource: str, subscription: str | None = None) -> str:
+    if _token_provider is not None:
+        return _token_provider(resource, subscription)
     az = "az.cmd" if os.name == "nt" else "az"
     cmd = [az, "account", "get-access-token", "--resource", resource,
            "--query", "accessToken", "-o", "tsv"]

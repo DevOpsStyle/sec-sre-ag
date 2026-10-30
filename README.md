@@ -22,7 +22,7 @@ customer-owned Azure SRE Agent deployments.
 
 | Section | What it contains |
 |---|---|
-| [Quick start](#quick-start) | Install the skills as a plugin and configure the agent in three steps |
+| [Quick start](#quick-start) | Install and configure everything with the setup wizard, or in three steps |
 | [Skills](#skills) | Supported security operations use cases, capabilities, and example prompts |
 | [Prerequisites](#prerequisites) | Required tooling, subscriptions, licenses, accounts, network access, and minimum administrative roles |
 | [Setup](#setup) | Customer repository, agent creation, plugin, connectors, IDs, permissions, RBAC, and data prerequisites |
@@ -41,6 +41,26 @@ This repository is an Azure SRE Agent **plugin**, packaged like the plugins of t
 contains the Python scripts and data files the skill runs. **There are no Python
 scripts to copy or paste by hand**: Azure SRE Agent copies each skill folder into
 the agent sandbox, and the skills run the scripts from there.
+
+**Easiest, with nothing to install (Windows): the setup wizard.** Download
+`SRE-Agent-Setup.exe` from the [latest release](../../releases/latest) of the
+repository and double-click it. A page opens in the browser:
+
+1. **Sign in** with your Microsoft account (SRE Agent Administrator on the agent).
+2. **Choose** the subscription and the agent.
+3. Select **Configure the agent**: the wizard installs the plugin, creates the
+   connectors and adds the troubleshooting guide to the knowledge base. Select
+   **Preview only** first to see what would change.
+4. Do what the page lists under **What is left to do**: the permission commands,
+   to paste in Azure Cloud Shell, and the Outlook and Teams connectors in the portal.
+
+The wizard needs neither Python nor Azure CLI and installs nothing on the
+computer. If Windows shows *Windows protected your PC*, select **More info > Run
+anyway**. If your company blocks the program, use `SRE-Agent-Setup-folder.zip` from
+the same release (extract it and double-click `SRE-Agent-Setup.exe` in the folder)
+or follow the steps below. See the [wizard guide](tools/README.md#sre-agent-setupexe--the-setup-wizard).
+
+The same setup, step by step:
 
 1. **Install the plugin** (portal, two minutes):
    1. Open <https://sre.azure.com>, select the agent (it must be **Running**), and go
@@ -68,6 +88,19 @@ the agent sandbox, and the skills run the scripts from there.
    In PowerShell, set the token with `$env:KQL_SEARCH_GITHUB_TOKEN = '<PAT>'`. The
    script also installs the plugin when step 1 was skipped, and every step is
    idempotent. See [`tools/README.md`](tools/README.md) for all options.
+
+   **Cannot run Python?** Do the same in the portal (about 10 minutes):
+   - **Build + setup > Extensions > Connectors > Add connector** (**Builder >
+     Connectors** in older portal versions): a **Log Analytics Workspace**
+     connector on the Sentinel workspace (skip it if one already exists) and two
+     **MCP server** connectors, `ms-learn-mcp` and `kql-search-mcp`, with the
+     values and the tool selection of [Setup D](#d-configure-code-access-and-connectors).
+   - **Build + setup > Context > Knowledge sources > Add file**: upload
+     [`docs/known-issues.md`](docs/known-issues.md).
+
+   The Azure Monitor tool used by the skills
+   (`monitor-client_monitor_workspace_log_query`) is built into every agent: there
+   is no connector to create for it.
 3. **Complete the steps that need a person.** The script prints them at the end,
    with your IDs already filled in: the permission scripts in [`setup/`](setup)
    (Graph and Defender application permissions, Sentinel and Key Vault roles) and
@@ -80,9 +113,9 @@ complete procedure, with prerequisites and roles, is in [Setup](#setup).
 |---|---|
 | 13 skills (`SKILL.md` and reference documents) | Plugin (step 1) |
 | Python scripts and data files used by the skills | Plugin (step 1): bundled in each skill folder and copied into the sandbox under `runtime-content/skills/plugins/<installation>/live/<skill>/` |
-| `sentinel-workspace` (Log Analytics), `ms-learn-mcp` and `kql-search-mcp` connectors | `tools/setup_agent.py` (step 2) |
-| `docs/known-issues.md` in the agent knowledge base | `tools/setup_agent.py` (step 2) |
-| Code Access (optional, for example for the DOCX technical report module) | `tools/setup_agent.py --code-repo <owner>/<repo>` (step 2) |
+| `sentinel-workspace` (Log Analytics), `ms-learn-mcp` and `kql-search-mcp` connectors | Setup wizard or `tools/setup_agent.py` (step 2) |
+| `docs/known-issues.md` in the agent knowledge base | Setup wizard or `tools/setup_agent.py` (step 2) |
+| Code Access (optional, for example for the DOCX technical report module) | Setup wizard (Advanced options) or `tools/setup_agent.py --code-repo <owner>/<repo>` (step 2) |
 | Graph and Defender application permissions, Sentinel and Key Vault roles | `setup/*.sh` scripts (step 3) |
 | Outlook and Teams connectors | Portal OAuth sign-in (step 3) |
 
@@ -271,9 +304,9 @@ steps. Use time-bound elevation and the narrowest practical scope.
 - Python 3.10 or later for the tools in [`tools/`](tools) (`setup_agent.py`,
    `plugin.py`, `deploy_skills.py`) and local script validation. The latest tests
    were performed with Python **3.14.7**. The tools use the standard library;
-   `tools/plugin.py check` also needs PyYAML. Python is not needed on the
-   workstation if you install the plugin and configure the connectors in the
-   portal.
+   `tools/plugin.py check` also needs PyYAML. Neither Python nor Azure CLI is
+   needed on the workstation if you use the setup wizard (`SRE-Agent-Setup.exe`,
+   see [Quick start](#quick-start)) or configure the agent in the portal.
 - Azure CLI installed on the workstation used to run the Python tools and
    authenticated to the Entra tenant that owns the target subscription. Use
    `az login`, or `az login --tenant <TARGET_TENANT_ID>` when the target tenant
@@ -609,7 +642,8 @@ required scope; the later Azure RBAC step adds the Sentinel-specific roles.
 
 1. Add an **MCP** connector, choose **Stdio**, set **MCP Server** to
    `kql-search-mcp`, and set **Command** to `npx`.
-2. Add `-y` and `kql-search-mcp` as two separate arguments.
+2. Add `-y` and `kql-search-mcp@1.0.5` (the verified version) as two separate
+   arguments.
 3. Add the read-only PAT as `GITHUB_TOKEN`. Optionally set `FAVORITE_REPOS` to a
    comma-separated list such as `<customer-org>/<customer-repo>,Azure/Azure-Sentinel,microsoft/Microsoft-365-Defender-Hunting-Queries`.
 4. Select the agent UAMI and enable only these tools:
@@ -689,8 +723,10 @@ POST {agentEndpoint}/api/v2/plugins/install-direct
 
 [`tools/setup_agent.py`](tools/setup_agent.py) uses the
 [Azure SRE Agent REST API](https://learn.microsoft.com/azure/sre-agent/api-reference)
-for what a plugin cannot install. Run it on a workstation with Python 3.10+ and
-Azure CLI, signed in to the tenant of the agent subscription:
+for what a plugin cannot install. The setup wizard (`SRE-Agent-Setup.exe`, see
+[Quick start](#quick-start)) runs the same steps from a web page, without Python or
+Azure CLI. To run the script, use a workstation with Python 3.10+ and Azure CLI,
+signed in to the tenant of the agent subscription:
 
 ```bash
 az login
@@ -1020,7 +1056,8 @@ The skills have been tested extensively and several **platform constraints, KQL 
 **First-time setup (automatic):** `tools/setup_agent.py` uploads
 `docs/known-issues.md` to the agent knowledge base, which the agent searches
 automatically when it is relevant (step E2). After updating the file, run
-`python tools/setup_agent.py --only knowledge` to upload the new version.
+`python tools/setup_agent.py --only knowledge` to upload the new version. Without
+Python, upload it in **Build + setup > Context > Knowledge sources > Add file**.
 
 **Optional: also seed the agent memory.** In the first conversation, send this
 prompt so that the agent also organizes the learnings in its memory:
@@ -1186,7 +1223,7 @@ sec-sre-ag/
 ├── shared/                    ← Canonical copies of files bundled into several skills
 ├── docs/                      ← Operator documentation (two files are also bundled into skills)
 ├── setup/                     ← Permission scripts, KQL job, Logic App playbooks
-├── tools/                     ← setup_agent.py, plugin.py, deploy_skills.py
+├── tools/                     ← setup_agent.py, plugin.py, deploy_skills.py, wizard/ (SRE-Agent-Setup.exe)
 └── .github/workflows/         ← CI: validates the plugin on every push and pull request
 ```
 

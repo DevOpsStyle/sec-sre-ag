@@ -61,7 +61,8 @@ from deploy_skills import (
     resolve_target,
 )
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+# Repository root, or the bundle root when this module runs inside SRE-Agent-Setup.exe (PyInstaller).
+REPO_ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
 CONFIG_FILE = Path(__file__).resolve().parent / "deploy.config.json"
 STEPS = ("plugin", "connectors", "knowledge", "code-access")
 KNOWLEDGE_FILES = ("docs/known-issues.md",)
@@ -191,10 +192,11 @@ def find_installation(agent: Agent, repo: str, path: str) -> dict | None:
 
 
 def step_plugin(agent: Agent, args, cfg: dict, report: Report) -> None:
-    repo = args.repo or cfg.get("pluginRepo") or detect_repo()
+    repo = args.repo  # resolved by run(): --repo, deploy.config.json pluginRepo, or git remote origin
     path = args.path if args.path is not None else cfg.get("pluginPath", "")
     if not repo:
-        report.add("plugin", "FAILED", "cannot detect the GitHub repository; pass --repo <owner>/<repo>")
+        report.add("plugin", "FAILED", "cannot detect the GitHub repository: set it (wizard Advanced options, "
+                                       "or --repo <owner>/<repo>)")
         return
     if repo.lower() == "stefanpems/sec-sre-ag":
         print("  ! installing from the source repository: the README recommends a customer-owned copy")
@@ -217,8 +219,8 @@ def step_plugin(agent: Agent, args, cfg: dict, report: Report) -> None:
         builder = [n for n in conflicts
                    if not ((next(s for s in existing if s.get("name") == n).get("properties") or {})
                            .get("sourcePluginInstallation"))]
-        hint = (f"remove the Skill Builder copies first: python tools/deploy_skills.py delete --sub {agent.target.sub} "
-                f"--rg {agent.target.rg} --agent {agent.target.agent} --skills {','.join(builder)}"
+        hint = (f"delete them in Builder > Skill builder, or run: python tools/deploy_skills.py delete --sub "
+                f"{agent.target.sub} --rg {agent.target.rg} --agent {agent.target.agent} --skills {','.join(builder)}"
                 if builder else "uninstall the other plugin that provides them (Builder > Plugins)")
         report.add("plugin", "FAILED", f"skills with the same names already exist ({', '.join(conflicts)}); {hint}")
         return
@@ -313,11 +315,12 @@ def step_connectors(agent: Agent, args, cfg: dict, report: Report) -> None:
                 workspace = found[0]
                 print(f"  discovered Sentinel workspace: {workspace}")
             elif found:
-                report.add("Log Analytics", "MANUAL", "several Sentinel workspaces found; choose one with --workspace: "
-                                                      + "; ".join(found))
+                report.add("Log Analytics", "MANUAL", "several Sentinel workspaces found: choose one (wizard list, "
+                                                      "or --workspace): " + "; ".join(found))
             else:
-                report.add("Log Analytics", "MANUAL", f"no Sentinel workspace found in subscription {agent.target.sub}; "
-                                                      "pass --workspace <workspace resource ID>")
+                report.add("Log Analytics", "MANUAL", f"no Sentinel workspace found in subscription {agent.target.sub}: "
+                                                      "give its resource ID (--workspace) or add the connector in "
+                                                      "Builder > Connectors")
         if workspace:
             put_connector(agent, LA_CONNECTOR, {
                 "dataConnectorType": "LogAnalytics",
@@ -341,10 +344,10 @@ def step_connectors(agent: Agent, args, cfg: dict, report: Report) -> None:
     token = os.environ.get("KQL_SEARCH_GITHUB_TOKEN")
     if not token:
         if KQL_CONNECTOR in existing:
-            report.add(KQL_CONNECTOR, "OK", "kept the existing connector (set KQL_SEARCH_GITHUB_TOKEN to update it)")
+            report.add(KQL_CONNECTOR, "OK", "kept the existing connector (give a GitHub token to update it)")
         else:
-            report.add(KQL_CONNECTOR, "MANUAL", "set KQL_SEARCH_GITHUB_TOKEN (read-only fine-grained PAT) and "
-                                                "run again with --only connectors")
+            report.add(KQL_CONNECTOR, "MANUAL", "no GitHub token: give a read-only fine-grained token (wizard field, "
+                                                "or KQL_SEARCH_GITHUB_TOKEN) and run the connectors step again")
         return
     envs = {"GITHUB_TOKEN": token}
     if os.environ.get("KQL_SEARCH_FAVORITE_REPOS"):
@@ -383,7 +386,7 @@ def step_knowledge(agent: Agent, args, report: Report) -> None:
 def step_code_access(agent: Agent, args, cfg: dict, report: Report) -> None:
     repos = args.code_repo or cfg.get("codeAccessRepos") or []
     if not repos:
-        report.add("code access", "SKIPPED", "not requested (only needed for the optional DOCX module: --code-repo)")
+        report.add("code access", "SKIPPED", "no repository given (only needed for the optional DOCX module)")
         return
     status, body = agent.dp("GET", "/api/v2/github/domains")
     domains = body.get("values") if status == 200 and isinstance(body, dict) else []
@@ -394,10 +397,11 @@ def step_code_access(agent: Agent, args, cfg: dict, report: Report) -> None:
             url = (oauth or {}).get("oAuthUrl") or (oauth or {}).get("OAuthUrl") if isinstance(oauth, dict) else None
             report.add("code access", "MANUAL", "the agent is not signed in to GitHub: "
                        + (f"open {url} and approve, " if url else "use Builder > Code Access, ")
-                       + "or set CODE_ACCESS_GITHUB_PAT; then run again with --only code-access")
+                       + "or give a GitHub token (wizard field, or CODE_ACCESS_GITHUB_PAT); then run the Code "
+                         "Access step again")
             return
         if args.dry_run:
-            report.add("code access", "DRY-RUN", "would store CODE_ACCESS_GITHUB_PAT as the github.com credential")
+            report.add("code access", "DRY-RUN", "would store the GitHub token as the github.com credential")
         else:
             status, body = agent.dp("PUT", "/api/v2/github/domains/github_com", {"AuthType": "Pat", "Pat": pat})
             if status not in (200, 201, 202, 204):
@@ -420,23 +424,27 @@ def step_code_access(agent: Agent, args, cfg: dict, report: Report) -> None:
 # --------------------------------------------------------------------------- #
 # Main
 # --------------------------------------------------------------------------- #
-def print_manual_steps(agent: Agent, cfg: dict) -> None:
+def manual_steps(agent: Agent, cfg: dict, repo: str | None) -> list[str]:
     workspace = cfg.get("_workspace") or cfg.get("sentinelWorkspaceResourceId")
     if not workspace:
         found = sentinel_workspaces(agent)
         workspace = found[0] if len(found) == 1 else "<WORKSPACE_RESOURCE_ID>"
     principal = agent.uami_principal or "<UAMI_OBJECT_ID>"
     client = agent.uami_client or "<UAMI_CLIENT_ID>"
-    print("\nStill to do by a person (cannot be automated through the agent APIs):")
-    print("  1. Permissions for the agent identity. In Azure Cloud Shell (Bash), from the setup/ folder:")
-    print(f"       ./assign-permissions.sh {principal} {agent.target.sub}      # Privileged Role Administrator")
-    print(f"       ./assign-azure-roles.sh {client} {workspace} [<KEYVAULT_RESOURCE_ID>]")
-    print("  2. Outlook and Microsoft Teams connectors: they need an interactive OAuth sign-in.")
-    print("     Builder > Connectors, sign in with the dedicated service account (README > Setup D).")
-    print("  3. Open a NEW chat and run the smoke tests in README > Validation Tests.")
+    repo = repo or "<customer-org>/<customer-repo>"
+    return [
+        "Still to do by a person (cannot be automated through the agent APIs):",
+        "  1. Permissions for the agent identity. In Azure Cloud Shell (Bash, https://shell.azure.com):",
+        f"       git clone https://github.com/{repo}.git && cd {repo.split('/')[-1]}/setup && chmod +x *.sh",
+        f"       ./assign-permissions.sh {principal} {agent.target.sub}      # Privileged Role Administrator",
+        f"       ./assign-azure-roles.sh {client} {workspace} [<KEYVAULT_RESOURCE_ID>]",
+        "  2. Outlook and Microsoft Teams connectors: they need an interactive OAuth sign-in.",
+        "     Builder > Connectors, sign in with the dedicated service account (README > Setup D).",
+        "  3. Open a NEW chat and run the smoke tests in README > Validation Tests.",
+    ]
 
 
-def main(argv: list[str] | None = None) -> int:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--sub", help="Azure subscription ID of the agent")
     parser.add_argument("--rg", help="Resource group of the agent")
@@ -451,15 +459,25 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--only", help=f"Comma-separated steps to run: {', '.join(STEPS)}")
     parser.add_argument("--skip", help="Comma-separated steps to skip")
     parser.add_argument("--dry-run", action="store_true", help="Read the agent state and print the planned changes only")
-    args = parser.parse_args(argv)
+    return parser
 
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = build_parser()
+    args = parser.parse_args(argv)
     steps = [s.strip() for s in (args.only.split(",") if args.only else STEPS) if s.strip()]
     steps = [s for s in steps if s not in {x.strip() for x in (args.skip or "").split(",")}]
     unknown = [s for s in steps if s not in STEPS]
     if unknown:
         parser.error(f"unknown step(s): {', '.join(unknown)}")
+    args.steps = steps
+    return args
 
+
+def run(args: argparse.Namespace) -> tuple[int, Report, list[str]]:
+    """Run the selected steps. Returns the exit code, the report rows and the manual steps."""
     cfg = load_config()
+    args.repo = args.repo or cfg.get("pluginRepo") or detect_repo()
     agent = Agent(resolve_target(args))
     print(f"Agent {agent.target.agent} ({agent.state}) - {agent.endpoint}")
     if agent.uami_id:
@@ -469,6 +487,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.dry_run:
         print("DRY RUN: only read operations are performed.")
 
+    steps = args.steps
     report = Report()
     if "plugin" in steps:
         print("\n[1/4] Plugin")
@@ -483,11 +502,16 @@ def main(argv: list[str] | None = None) -> int:
         print("\n[4/4] Code Access")
         step_code_access(agent, args, cfg, report)
 
-    print_manual_steps(agent, cfg)
+    lines = manual_steps(agent, cfg, args.repo)
+    print("\n" + "\n".join(lines))
     print("\nSummary:")
     for item, status, _ in report.rows:
         print(f"  {status:8s} {item}")
-    return 1 if report.failed else 0
+    return (1 if report.failed else 0), report, lines
+
+
+def main(argv: list[str] | None = None) -> int:
+    return run(parse_args(argv))[0]
 
 
 if __name__ == "__main__":
