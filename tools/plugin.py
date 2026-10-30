@@ -73,6 +73,7 @@ MAX_DESCRIPTION = 1024
 IGNORED_PARTS = {"__pycache__", ".pytest_cache", ".mypy_cache"}
 LINK_RE = re.compile(r"(?<!!)\[[^\]\n]*\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
 FENCE_RE = re.compile(r"^\s*(```|~~~)")
+INLINE_CODE_RE = re.compile(r"(`+)(?:(?!\1).)+?\1")
 SECRET_RE = re.compile(r"(ghp_|gho_|github_pat_|xox[bp]-|sk-[A-Za-z0-9]{20})")
 
 
@@ -194,7 +195,8 @@ def check_links(skill_dir: Path, md_file: Path, report: Report) -> None:
             continue
         if in_fence:
             continue
-        for match in LINK_RE.finditer(line):
+        # Links shown as examples inside inline code are not links.
+        for match in LINK_RE.finditer(INLINE_CODE_RE.sub("", line)):
             target = match.group(1)
             if target.startswith(("http://", "https://", "mailto:", "#")) or any(c in target for c in "<>{}$*"):
                 continue
