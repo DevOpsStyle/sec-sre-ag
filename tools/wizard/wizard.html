@@ -51,6 +51,15 @@
   .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid #c4c7cc; border-top-color: var(--accent);
              border-radius: 50%; animation: spin 1s linear infinite; vertical-align: -2px; margin-right: 8px; }
   @keyframes spin { to { transform: rotate(360deg); } }
+  .subbox { border: 1px solid var(--border); border-radius: 6px; padding: 12px 16px; margin-top: 16px;
+            background: #fafbfc; font-size: 14px; }
+  ol.steps { margin: 6px 0 0; padding-left: 22px; }
+  ol.steps li { margin: 10px 0; }
+  a.linkbutton { display: inline-block; padding: 6px 14px; border: 1px solid var(--accent); border-radius: 4px;
+                 background: #fff; text-decoration: none; font-size: 14px; }
+  code { font-family: Consolas, "Courier New", monospace; font-size: 13px; background: #eef0f3; padding: 0 4px;
+         border-radius: 3px; }
+  .ok { color: var(--ok); }
 </style>
 </head>
 <body>
@@ -90,12 +99,24 @@
     <div class="indent" id="connectorOptions">
       <label class="field" for="workspace">Microsoft Sentinel workspace</label>
       <select id="workspace"></select>
-      <label class="field" for="kqlToken">GitHub token for the KQL search tools (optional)</label>
-      <input type="password" id="kqlToken" autocomplete="off" placeholder="Leave empty to skip the KQL search tools">
-      <p class="hint">A fine-grained GitHub personal access token with read-only access
-        (<a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener noreferrer">create it on GitHub</a>,
-        with <b>Repository access: Public repositories</b>). It is sent only to your agent. Without it the skills
-        still work, but the plugin page shows <i>Connector setup required</i>.</p>
+      <div class="subbox">
+        <b>KQL search tools</b> <span class="hint">(optional)</span>
+        <p class="hint">They let the agent check the Microsoft Sentinel tables, validate KQL queries and find query
+          examples on GitHub. They need a GitHub token: a free GitHub account is enough.</p>
+        <div id="kqlState" class="status"></div>
+        <ol class="steps">
+          <li><a class="linkbutton" id="ghTokenLink" href="https://github.com/settings/personal-access-tokens/new"
+                 target="_blank" rel="noopener noreferrer">Create the token on GitHub</a>
+            <div class="hint">GitHub opens with the form already filled in. Sign in (or create a free account),
+              select <b>Generate token</b> at the bottom of the page, then copy the token: it starts with
+              <code>github_pat_</code>.</div></li>
+          <li><label class="field" for="kqlToken">Paste the token here</label>
+            <input type="password" id="kqlToken" autocomplete="off" spellcheck="false" placeholder="github_pat_...">
+            <div id="kqlTokenStatus" class="status"></div></li>
+        </ol>
+        <p class="hint">The token is sent only to GitHub, to check it, and to your agent. Leave the field empty to
+          skip these tools: the skills work without them, but the plugin page shows <i>Connector setup required</i>.</p>
+      </div>
     </div>
     <label class="check"><input type="checkbox" id="doKnowledge" checked>
       <span><b>Add the troubleshooting guide</b> to the agent knowledge base</span></label>
@@ -169,9 +190,10 @@ function setStatus(el, text, kind) {
   if (kind === "busy") { const s = document.createElement("span"); s.className = "spinner"; el.appendChild(s); }
   const t = document.createElement("span");
   t.textContent = text;
-  if (kind === "error" || kind === "warning") t.className = kind;
+  if (kind === "error" || kind === "warning" || kind === "ok") t.className = kind;
   el.appendChild(t);
 }
+const capitalize = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 function enable(id, on) { $(id).classList.toggle("disabled", !on); }
 function addOption(select, value, text) {
   const o = document.createElement("option"); o.value = value; o.textContent = text; select.appendChild(o); return o;
@@ -186,6 +208,7 @@ async function init() {
   $("repo").value = st.defaults.repo || "";
   $("tenant").value = st.defaults.tenant || "";
   $("version").textContent = `Version ${st.defaults.version}`;
+  if (st.defaults.githubTokenUrl) $("ghTokenLink").href = st.defaults.githubTokenUrl;
   updatePluginHint();
   if (st.defaults.mode === "azure-cli") $("signin").textContent = "Use my Azure CLI sign-in";
   if (st.signedIn) await afterSignIn(st.user);
@@ -197,6 +220,33 @@ function updatePluginHint() {
 }
 $("repo").addEventListener("input", updatePluginHint);
 $("doConnectors").addEventListener("change", () => { $("connectorOptions").hidden = !$("doConnectors").checked; });
+
+// Check the pasted GitHub token as soon as the user stops typing; only the latest check is shown.
+let tokenCheck = 0, tokenTimer = null;
+$("kqlToken").addEventListener("input", () => {
+  const seq = ++tokenCheck;
+  clearTimeout(tokenTimer);
+  const token = $("kqlToken").value.trim();
+  if (!token) { $("kqlTokenStatus").replaceChildren(); return; }
+  setStatus($("kqlTokenStatus"), "Checking the token with GitHub...", "busy");
+  tokenTimer = setTimeout(async () => {
+    try {
+      const r = await api("POST", "/api/github-token", {token});
+      if (seq !== tokenCheck) return;
+      if (r.valid === true) {
+        setStatus($("kqlTokenStatus"), `Valid token of the GitHub account ${r.login}` +
+          (r.expires ? `, it expires on ${r.expires}.` : ", with no expiration date."), "ok");
+      } else if (r.valid === false) {
+        setStatus($("kqlTokenStatus"), `${capitalize(r.error)}.`, "error");
+      } else {
+        setStatus($("kqlTokenStatus"), `The token cannot be checked now (${r.error}). ` +
+          "It is checked again when you configure the agent.", "warning");
+      }
+    } catch (e) {
+      if (seq === tokenCheck) setStatus($("kqlTokenStatus"), e.message, "error");
+    }
+  }, 600);
+});
 
 $("signin").onclick = async () => {
   $("signin").disabled = true;
@@ -258,7 +308,7 @@ async function loadAgents() {
 $("agent").onchange = loadAgent;
 async function loadAgent() {
   const value = $("agent").value;
-  current = null; $("agentInfo").replaceChildren();
+  current = null; $("agentInfo").replaceChildren(); $("kqlState").replaceChildren();
   enable("step3", false); enable("step4", false);
   if (!value) return;
   const [rg, name] = value.split("/");
@@ -269,6 +319,12 @@ async function loadAgent() {
     current = {sub, rg, name, details: d};
     renderAgent(d);
     fillWorkspaces(d);
+    if (d.kqlSearchConnected) {
+      setStatus($("kqlState"), "Already connected on this agent: paste a new token only to replace the current one, " +
+        "for example when it expires.", "ok");
+    } else {
+      setStatus($("kqlState"), "Not connected on this agent yet.", "warning");
+    }
     enable("step3", true); enable("step4", true);
   } catch (e) { setStatus($("agentInfo"), e.message, "error"); }
 }
@@ -288,6 +344,9 @@ function renderAgent(d) {
   add("Managed identity", d.identity.name || "system-assigned only");
   add("Security skills", d.plugin.installed ? `installed (commit ${d.plugin.commit || "?"}, ${d.plugin.skills} skills)` : "not installed yet");
   add("Connectors", d.connectors.length ? d.connectors.join(", ") : "none yet");
+  if (d.plugin.installed && d.plugin.missingConnectors.length) {
+    add("Plugin page", `Connector setup required: ${d.plugin.missingConnectors.join(", ")} is missing (see step 3)`, "warning");
+  }
   box.appendChild(kv);
   if (!running) {
     const p = document.createElement("p");

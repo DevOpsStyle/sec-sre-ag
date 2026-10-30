@@ -48,10 +48,14 @@ repository and double-click it. A page opens in the browser:
 
 1. **Sign in** with your Microsoft account (SRE Agent Administrator on the agent).
 2. **Choose** the subscription and the agent.
-3. Select **Configure the agent**: the wizard installs the plugin, creates the
+3. Optional, for the KQL search tools: select **Create the token on GitHub**. GitHub
+   opens with the form already filled in: sign in (a free account is enough),
+   select **Generate token**, copy the token and paste it in the wizard, which
+   checks it at once.
+4. Select **Configure the agent**: the wizard installs the plugin, creates the
    connectors and adds the troubleshooting guide to the knowledge base. Select
    **Preview only** first to see what would change.
-4. Do what the page lists under **What is left to do**: the permission commands,
+5. Do what the page lists under **What is left to do**: the permission commands,
    to paste in Azure Cloud Shell, and the Outlook and Teams connectors in the portal.
 
 The wizard needs neither Python nor Azure CLI and installs nothing on the
@@ -63,11 +67,20 @@ or follow the steps below. See the [wizard guide](tools/README.md#sre-agent-setu
 > **"Connector setup required" on the plugin page** is a reminder, not an error.
 > Installing a plugin never creates connectors, so the page shows this banner
 > while an MCP server declared in [`.mcp.json`](.mcp.json) has no connector. Here
-> that is `kql-search-mcp`, created only when you give a read-only GitHub token
-> (wizard step 3, `KQL_SEARCH_GITHUB_TOKEN`, or by hand as in
-> [`kql-search-mcp`](#kql-search-mcp)). The banner does not track `ms-learn-mcp`,
-> a server without authentication. The skills work without `kql-search-mcp`;
-> only KQL schema lookups, query validation and examples are missing.
+> that is `kql-search-mcp`, created only when you give a GitHub token (wizard
+> step 3 above, `KQL_SEARCH_GITHUB_TOKEN`, or by hand as in
+> [`kql-search-mcp`](#kql-search-mcp)). To add it later, run the wizard again with
+> only **Connect Microsoft Sentinel and the documentation tools** selected and
+> paste the token. The banner does not track `ms-learn-mcp`, a server without
+> authentication. The skills work without `kql-search-mcp`; only KQL schema
+> lookups, query validation and examples are missing.
+>
+> **The GitHub token** needs no permission: every GitHub token can read public
+> repositories, which is all `kql-search-mcp` uses. Create it at
+> [this pre-filled page](https://github.com/settings/personal-access-tokens/new?name=Azure+SRE+Agent+KQL+search&description=Read-only+token+for+the+kql-search-mcp+connector+of+Azure+SRE+Agent&expires_in=365):
+> sign in to GitHub (or create a free account), select **Generate token** and copy
+> the token, which starts with `github_pat_`. It expires after one year: before
+> that date create a new one and give it to the wizard again.
 
 The same setup, step by step:
 
@@ -89,7 +102,7 @@ The same setup, step by step:
 
    ```bash
    az login
-   export KQL_SEARCH_GITHUB_TOKEN='<read-only GitHub PAT>'   # optional, for kql-search-mcp
+   export KQL_SEARCH_GITHUB_TOKEN='<GitHub token>'   # optional, for kql-search-mcp (see "The GitHub token" above)
    python tools/setup_agent.py --sub <SUBSCRIPTION_ID> --rg <RESOURCE_GROUP> --agent <AGENT_NAME> --dry-run
    python tools/setup_agent.py --sub <SUBSCRIPTION_ID> --rg <RESOURCE_GROUP> --agent <AGENT_NAME>
    ```
@@ -653,7 +666,9 @@ required scope; the later Azure RBAC step adds the Sentinel-specific roles.
    `kql-search-mcp`, and set **Command** to `npx`.
 2. Add `-y` and `kql-search-mcp@1.0.5` (the verified version) as two separate
    arguments.
-3. Add the read-only PAT as `GITHUB_TOKEN`. Optionally set `FAVORITE_REPOS` to a
+3. Add the GitHub token as `GITHUB_TOKEN`. Create it at the
+   [pre-filled token page](https://github.com/settings/personal-access-tokens/new?name=Azure+SRE+Agent+KQL+search&description=Read-only+token+for+the+kql-search-mcp+connector+of+Azure+SRE+Agent&expires_in=365):
+   sign in, select **Generate token** and copy it; it needs no permission. Optionally set `FAVORITE_REPOS` to a
    comma-separated list such as `<customer-org>/<customer-repo>,Azure/Azure-Sentinel,microsoft/Microsoft-365-Defender-Hunting-Queries`.
 4. Select the agent UAMI and enable only these tools:
 
@@ -739,7 +754,7 @@ signed in to the tenant of the agent subscription:
 
 ```bash
 az login
-export KQL_SEARCH_GITHUB_TOKEN='<read-only fine-grained PAT>'   # optional, for kql-search-mcp
+export KQL_SEARCH_GITHUB_TOKEN='<GitHub token>'   # optional, for kql-search-mcp (see Quick start, "The GitHub token")
 python tools/setup_agent.py --sub <SUB> --rg <RG> --agent <AGENT> --dry-run
 python tools/setup_agent.py --sub <SUB> --rg <RG> --agent <AGENT>
 ```
@@ -747,7 +762,7 @@ python tools/setup_agent.py --sub <SUB> --rg <RG> --agent <AGENT>
 | Step | Result |
 |---|---|
 | Plugin | Installs the plugin from the `origin` remote of the clone (or `--repo <owner>/<repo>`), unless it is already installed |
-| Connectors | `sentinel-workspace` Log Analytics connector with the agent managed identity (the Sentinel workspace is discovered in the agent subscription, or pass `--workspace <resource ID>`; an existing Log Analytics connector is kept), `ms-learn-mcp`, and `kql-search-mcp` when `KQL_SEARCH_GITHUB_TOKEN` is set. The MCP connectors are tested after creation |
+| Connectors | `sentinel-workspace` Log Analytics connector with the agent managed identity (the Sentinel workspace is discovered in the agent subscription, or pass `--workspace <resource ID>`; an existing Log Analytics connector is kept), `ms-learn-mcp`, and `kql-search-mcp` when `KQL_SEARCH_GITHUB_TOKEN` is set (the token is checked with GitHub first, and its expiration date is reported). The MCP connectors are tested after creation |
 | Knowledge base | Uploads [`docs/known-issues.md`](docs/known-issues.md) to the agent knowledge base (see [section 7](#7-known-issues--memory-seeding)) |
 | Code Access (optional) | `--code-repo <owner>/<repo>` connects a repository, for example the private DOCX module |
 

@@ -30,7 +30,8 @@ Usage, from the repository root after `az login`:
     python tools/setup_agent.py --sub <SUB> --rg <RG> --agent <AGENT>
 
 Secrets are read only from environment variables, never from the command line:
-    KQL_SEARCH_GITHUB_TOKEN     fine-grained GitHub PAT (read-only) for kql-search-mcp
+    KQL_SEARCH_GITHUB_TOKEN     GitHub token for kql-search-mcp, checked with GitHub before use. Create it
+                                at GITHUB_TOKEN_URL below (read-only, public repositories only)
     KQL_SEARCH_FAVORITE_REPOS   optional, comma-separated owner/repo list for kql-search-mcp
     PLUGIN_GITHUB_PAT           only when the plugin repository is private
     CODE_ACCESS_GITHUB_PAT      only for --code-repo when the agent has no GitHub sign-in yet
@@ -81,7 +82,13 @@ KQL_TOOLS = (
     "get_query_documentation", "list_table_categories", "get_tables_by_category",
 )
 SECRET_ENV_VARS = ("KQL_SEARCH_GITHUB_TOKEN", "PLUGIN_GITHUB_PAT", "CODE_ACCESS_GITHUB_PAT")
+GITHUB_API = "https://api.github.com"
 GITHUB_TOKEN_PAGE = "https://github.com/settings/personal-access-tokens/new"
+# The token page with the form already filled in. Without permission parameters the token can only
+# read public repositories, which is all kql-search-mcp needs (code and repository search).
+GITHUB_TOKEN_URL = (f"{GITHUB_TOKEN_PAGE}?name=Azure+SRE+Agent+KQL+search&description=Read-only+token+for+the+"
+                    "kql-search-mcp+connector+of+Azure+SRE+Agent&expires_in=365")
+GITHUB_TOKEN_RE = re.compile(r"^[A-Za-z0-9_]{20,255}$")
 
 
 # --------------------------------------------------------------------------- #
@@ -90,10 +97,36 @@ GITHUB_TOKEN_PAGE = "https://github.com/settings/personal-access-tokens/new"
 def redact(text: Any) -> str:
     out = text if isinstance(text, str) else json.dumps(text, ensure_ascii=False)
     for var in SECRET_ENV_VARS:
-        value = os.environ.get(var)
+        value = (os.environ.get(var) or "").strip()
         if value:
             out = out.replace(value, "***")
     return out[:400]
+
+
+def check_github_token(token: str) -> dict:
+    """Ask GitHub whose token this is, with the same kind of call kql-search-mcp makes.
+
+    Returns {"valid": True, "login", "expires"}, {"valid": False, "error"} when GitHub rejects
+    the token, or {"valid": None, "error"} when GitHub cannot be reached.
+    """
+    token = token.strip()
+    if not GITHUB_TOKEN_RE.match(token):
+        return {"valid": False, "error": "this is not a GitHub token (it starts with github_pat_ and has only "
+                                         "letters, digits and _): copy it again"}
+    request = urllib.request.Request(f"{GITHUB_API}/user", headers={
+        "Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
+        "User-Agent": "sec-sre-ag-setup"})
+    try:
+        with urllib.request.urlopen(request, timeout=20) as resp:
+            body = json.loads(resp.read().decode("utf-8") or "{}")
+            expires = re.match(r"\d{4}-\d{2}-\d{2}", resp.headers.get("GitHub-Authentication-Token-Expiration") or "")
+        return {"valid": True, "login": body.get("login") or "?", "expires": expires.group(0) if expires else None}
+    except urllib.error.HTTPError as exc:
+        if exc.code == 401:
+            return {"valid": False, "error": "GitHub does not accept this token: it is incomplete, expired or deleted"}
+        return {"valid": None, "error": f"GitHub answered HTTP {exc.code}"}
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        return {"valid": None, "error": f"cannot reach GitHub ({getattr(exc, 'reason', exc)})"}
 
 
 def load_config() -> dict:
@@ -344,17 +377,28 @@ def step_connectors(agent: Agent, args, cfg: dict, report: Report) -> None:
     }, args, report, LEARN_CONNECTOR):
         test_connector(agent, LEARN_CONNECTOR, LEARN_TOOLS, report)
 
-    token = os.environ.get("KQL_SEARCH_GITHUB_TOKEN")
+    token = (os.environ.get("KQL_SEARCH_GITHUB_TOKEN") or "").strip()
     if not token:
         if KQL_CONNECTOR in existing:
             report.add(KQL_CONNECTOR, "OK", "kept the existing connector (give a GitHub token to update it)")
         else:
             report.add(KQL_CONNECTOR, "MANUAL", "not created: no GitHub token. The skills work without it, but the "
                                                 "plugin page shows 'Connector setup required' until it exists. Create "
-                                                f"a read-only fine-grained token ({GITHUB_TOKEN_PAGE}, Repository "
-                                                "access: Public repositories) and run the connectors step again with "
-                                                "it (wizard field, or KQL_SEARCH_GITHUB_TOKEN)")
+                                                f"a free read-only token at {GITHUB_TOKEN_URL} (sign in to GitHub, "
+                                                "select Generate token, copy the token) and run the connectors step "
+                                                "again with it (wizard step 3, or KQL_SEARCH_GITHUB_TOKEN)")
         return
+    github = check_github_token(token)
+    if github["valid"] is False:
+        report.add(KQL_CONNECTOR, "FAILED", f"{github['error']}. Create a new token at {GITHUB_TOKEN_URL} and run "
+                                            "the connectors step again with it")
+        return
+    if github["valid"]:
+        report.add("GitHub token", "OK", f"account {github['login']}, " + (
+            f"expires on {github['expires']}: before that date create a new token and run the connectors step "
+            "again with it" if github["expires"] else "no expiration date"))
+    else:
+        report.add("GitHub token", "WARN", f"not checked, {github['error']}")
     envs = {"GITHUB_TOKEN": token}
     if os.environ.get("KQL_SEARCH_FAVORITE_REPOS"):
         envs["FAVORITE_REPOS"] = os.environ["KQL_SEARCH_FAVORITE_REPOS"]

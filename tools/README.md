@@ -26,16 +26,26 @@ Python nor Azure CLI, and nothing is installed.
    directory, enter its tenant ID or domain under *My subscription is in another
    directory* first.
 3. **Choose** the subscription and the agent. The page shows the agent status, its
-   identity, the installed connectors and whether the skills are already installed.
+   identity, the installed connectors, whether the skills are already installed and
+   whether the plugin page shows *Connector setup required*.
 4. **Choose what to configure**: install the skills (plugin), connect Microsoft
    Sentinel and the documentation tools (keep the existing Log Analytics connector or
-   pick the Sentinel workspace; paste a read-only GitHub token to add the KQL search
-   tools), and add the troubleshooting guide. Code Access, a different plugin
-   repository and private-repository tokens are under *Advanced options*.
-   To create the GitHub token: github.com > **Settings > Developer settings >
-   Personal access tokens > Fine-grained tokens > Generate new token**, with
-   **Repository access: Public repositories (read-only)**. Without it, the plugin
-   page keeps showing *Connector setup required* for `kql-search-mcp`.
+   pick the Sentinel workspace), and add the troubleshooting guide. Code Access, a
+   different plugin repository and private-repository tokens are under *Advanced
+   options*.
+   The **KQL search tools** box is optional and needs a GitHub token (a free GitHub
+   account is enough, and the token needs no permission):
+   1. Select **Create the token on GitHub**: GitHub opens with the name, the
+      description and a one-year expiration already filled in. Sign in, select
+      **Generate token** at the bottom of the page and copy the token
+      (`github_pat_...`).
+   2. Paste it in the wizard. The wizard asks GitHub at once whether the token works
+      and shows its account and expiration date, or why it does not work.
+
+   Without a token the KQL search tools are skipped, and the plugin page keeps
+   showing *Connector setup required* for `kql-search-mcp`. To add them later, or to
+   replace an expiring token, run the wizard again with only **Connect Microsoft
+   Sentinel and the documentation tools** selected.
 5. Select **Configure the agent**, with **Preview only** first if you want to see the
    planned changes. Each item shows OK, MANUAL (something to complete), WARN or
    FAILED; *Show details* displays the full log. The *plugin page* item tells whether
@@ -57,8 +67,9 @@ Python nor Azure CLI, and nothing is installed.
 the random session code in the page address. The sign-in uses the Microsoft
 identity platform in your browser (MSAL with the public client ID of Azure CLI,
 the default of the Azure Identity libraries); access tokens and the GitHub tokens
-you type stay in memory, are sent only to Azure SRE Agent, and are never written to
-disk or to the log. The wizard stops when you close it, or after two hours without
+you type stay in memory and are never written to disk or to the log. GitHub tokens
+are sent only to Azure SRE Agent and, to check the KQL search token, to
+`api.github.com`. The wizard stops when you close it, or after two hours without
 activity.
 
 **Publish it for customers** (maintainers):
@@ -152,16 +163,16 @@ Secrets are read only from environment variables, never from the command line:
 
 | Variable | Needed for |
 |---|---|
-| `KQL_SEARCH_GITHUB_TOKEN` | `kql-search-mcp`: a fine-grained GitHub PAT with read-only access. Without it the connector is skipped, and the plugin page shows *Connector setup required* |
+| `KQL_SEARCH_GITHUB_TOKEN` | `kql-search-mcp`: a GitHub token, created at the [pre-filled token page](https://github.com/settings/personal-access-tokens/new?name=Azure+SRE+Agent+KQL+search&description=Read-only+token+for+the+kql-search-mcp+connector+of+Azure+SRE+Agent&expires_in=365) (no permission needed: every token reads public repositories). The script checks it with GitHub (`GET https://api.github.com/user`) and reports its expiration date; a token GitHub rejects stops the connector with FAILED. Without it the connector is skipped, and the plugin page shows *Connector setup required* |
 | `KQL_SEARCH_FAVORITE_REPOS` | Optional `FAVORITE_REPOS` for `kql-search-mcp` |
 | `PLUGIN_GITHUB_PAT` | Only when the plugin repository is private |
 | `CODE_ACCESS_GITHUB_PAT` | Only for `--code-repo` when the agent is not signed in to GitHub yet. Otherwise the script prints the OAuth sign-in URL |
 
 ```bash
 # Bash
-export KQL_SEARCH_GITHUB_TOKEN='<read-only PAT>'
+export KQL_SEARCH_GITHUB_TOKEN='<GitHub token>'
 # PowerShell
-$env:KQL_SEARCH_GITHUB_TOKEN = '<read-only PAT>'
+$env:KQL_SEARCH_GITHUB_TOKEN = '<GitHub token>'
 ```
 
 Every step is idempotent: run the script again after fixing a prerequisite.

@@ -225,6 +225,7 @@ class Wizard:
             "tenant": tenant or "",
             "mode": auth_mode,
             "version": BUILD.get("commit") or "dev",
+            "githubTokenUrl": setup_agent.GITHUB_TOKEN_URL,
         }
         deploy_skills.set_token_provider(self._token)
 
@@ -308,17 +309,32 @@ class Wizard:
         repo = str(query.get("repo") or self.defaults["repo"]).strip()
         installed = setup_agent.find_installation(agent, repo, "") if REPO_RE.match(repo) else None
         spec = (installed or {}).get("spec") or {}
+        mcp = (installed or {}).get("mcpConnectorStatus") or {}
+        names = sorted(c.get("name") for c in connectors if c.get("name"))
         return {
             "state": agent.state,
             "endpoint": agent.endpoint,
             "identity": {"name": (agent.uami_id or "").split("/")[-1], "principalId": agent.uami_principal,
                          "clientId": agent.uami_client},
-            "connectors": sorted(c.get("name") for c in connectors if c.get("name")),
+            "connectors": names,
             "logAnalyticsConnectors": la,
             "workspaces": setup_agent.sentinel_workspaces(agent),
             "plugin": {"installed": bool(installed), "commit": (spec.get("sourceCommit") or "")[:7],
-                       "skills": len(spec.get("importedSkills") or [])},
+                       "skills": len(spec.get("importedSkills") or []),
+                       "missingConnectors": (mcp.get("missing") or []) if mcp.get("knownStatus") else []},
+            "kqlSearchConnected": setup_agent.KQL_CONNECTOR in names
+                                  or setup_agent.KQL_CONNECTOR in (mcp.get("configured") or []),
         }
+
+    # POST /api/github-token
+    def github_token(self, body: dict) -> dict:
+        token = str(body.get("token") or "").strip()
+        if not token:
+            raise UserError("Paste the token first.")
+        if len(token) > 500:
+            raise UserError("A token is too long.")
+        result = setup_agent.check_github_token(token)
+        return {key: result.get(key) for key in ("valid", "login", "expires", "error")}
 
     # POST /api/run
     def start_job(self, body: dict) -> dict:
@@ -407,6 +423,7 @@ ROUTES = {
     ("GET", "/api/subscriptions"): Wizard.subscriptions,
     ("GET", "/api/agents"): Wizard.agents,
     ("GET", "/api/agent"): Wizard.agent_details,
+    ("POST", "/api/github-token"): Wizard.github_token,
     ("POST", "/api/run"): Wizard.start_job,
     ("GET", "/api/job"): Wizard.job_status,
     ("POST", "/api/exit"): Wizard.exit,
